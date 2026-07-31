@@ -64,3 +64,43 @@ export function parseAgentToolMeta(
     totalToolUseCount: getNumber(record.totalToolUseCount),
   };
 }
+
+/**
+ * Fallback async detection using the Agent tool's result metadata.
+ *
+ * When the SDK launches a background agent it returns a launch-acknowledgment
+ * tool_result whose toolUseResult contains only an {@code agentId} — no usage
+ * stats yet (those arrive later via {@code task_notification}). A sync agent
+ * that has already completed has {@code totalTokens} / {@code totalDurationMs}
+ * in the same metadata.
+ *
+ * This check catches agents that the SDK launched without setting the
+ * {@code run_in_background} input flag but that are genuinely background
+ * (have only {@code agentId} in their toolUseResult). Calling code should
+ * prefer {@link isAsyncAgentInput} when the raw input is available and use
+ * this as a fallback.
+ *
+ * @returns true when the tool result has an agentId but no completion stats,
+ *   or when the toolUseResult metadata is absent (serialization dropped it).
+ */
+export function isAsyncByAgentMetadata(
+  getToolResultRaw: GetToolResultRawFn,
+  toolUseId: string,
+): boolean {
+  const rawMessage = getToolResultRaw(toolUseId);
+  if (!rawMessage) return false;
+  const metadata = rawMessage.toolUseResult;
+  // If toolUseResult is absent or empty, the metadata was likely dropped
+  // during serialization (e.g. history replay loses the field). Since we
+  // know the tool launched (non-error result exists upstream), assume this
+  // is a launch ack for a still-running background agent.
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return true;
+  const record = metadata as Record<string, unknown>;
+  const hasAgentId = typeof record.agentId === 'string' && record.agentId.trim().length > 0;
+  // No agentId but we do have some metadata object — assume async.
+  if (!hasAgentId) return true;
+  const hasCompletionStats = typeof record.totalDurationMs === 'number'
+    || typeof record.totalTokens === 'number';
+  // Has agentId but no completion stats → launch ack, agent still running.
+  return !hasCompletionStats;
+}
