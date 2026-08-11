@@ -451,9 +451,6 @@ public class PermissionService {
         boolean dialogFutureOwnsCleanup = false;
 
         try {
-            // Delete immediately to prevent duplicate polling (polling interval is 500ms)
-            safeDeleteFile(requestFile, "ASK");
-
             JsonObject request;
             try {
                 request = gson.fromJson(content, JsonObject.class);
@@ -467,6 +464,13 @@ public class PermissionService {
                 debugLog("ASK_INVALID", "Missing required fields: " + fileName);
                 return;
             }
+
+            // 解析校验通过后才删除请求文件，防止下一轮轮询重复处理。
+            // 不能在解析前删除：轮询可能读到 CLI 写入中的不完整内容，解析失败后
+            // 文件已被删会让请求永久丢失（对话框不显示）。解析失败时保留文件，
+            // 由下一轮轮询（500ms 后）在文件写完整后重试，与 handlePermissionRequest
+            // 的失败保留策略保持一致。
+            safeDeleteFile(requestFile, "ASK");
 
             String requestId = request.get("requestId").getAsString();
             AskUserQuestionDialogShower shower = dialogRouter.findAskUserQuestionDialogShower(request);
