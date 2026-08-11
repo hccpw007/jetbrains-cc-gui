@@ -189,8 +189,14 @@ export function useChatComputations({
       : messages;
   }, [streamingActive, latestTurnMessages, messages, getContentBlocks]);
 
+  // Subagents always scan the full conversation, not the latest-turn slice.
+  // Async (run_in_background) subagents keep running across turns: a subagent
+  // launched in turn N must still appear (as "running"/spinning) while the user
+  // continues chatting in turn N+1. Scoping to the latest turn during streaming
+  // would drop those still-running background agents from the list, so the user
+  // could never see the in-progress spinner — only the settled completed check.
   const latestTurnSubagents = useSubagents({
-    messages: statusScopeMessages,
+    messages,
     getContentBlocks,
     findToolResult,
     getToolResultRaw,
