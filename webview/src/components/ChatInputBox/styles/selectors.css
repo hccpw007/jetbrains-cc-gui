@@ -84,6 +84,26 @@
   margin: 0;
 }
 
+/*
+ * 收窄模式下 模式/模型/effort 三个选择器优先显示文本而非图标：
+ * 隐藏主图标（含模型 SVG 图标），恢复文本显示，保证收窄后仍能辨认当前配置。
+ */
+.button-area--compact:not([data-measuring]) .selector-button.selector-text-first > .codicon:not(.codicon-chevron-up):not(.codicon-chevron-down),
+.button-area--compact:not([data-measuring]) .selector-button.selector-text-first > svg {
+  display: none;
+}
+
+.button-area--compact:not([data-measuring]) .selector-button.selector-text-first .selector-button-text {
+  max-width: 100%;
+  opacity: 1;
+}
+
+/* 文本按钮无需纯图标模式预留的最小宽度 */
+.button-area--compact:not([data-measuring]) .selector-button.selector-text-first {
+  gap: 3px;
+  min-width: auto;
+}
+
 .button-area--compact:not([data-measuring]) .selector-button {
   gap: 2px;
   padding: 4px 6px;

@@ -299,7 +299,7 @@ export const ModelSelect = ({ value, onChange, models = AVAILABLE_MODELS, curren
     <div style={RELATIVE_INLINE_BLOCK_STYLE}>
       <button
         ref={buttonRef}
-        className="selector-button"
+        className="selector-button selector-text-first"
         onClick={handleToggle}
         title={t('chat.currentModel', { model: getModelLabel(currentModel, true) })}
       >
