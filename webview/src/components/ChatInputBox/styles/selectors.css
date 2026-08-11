@@ -104,6 +104,11 @@
   min-width: auto;
 }
 
+/* 收窄模式下隐藏模型名的 1M 上下文后缀，只保留模型名 */
+.button-area--compact:not([data-measuring]) .selector-button.selector-text-first .selector-model-1m {
+  display: none;
+}
+
 .button-area--compact:not([data-measuring]) .selector-button {
   gap: 2px;
   padding: 4px 6px;

@@ -177,6 +177,11 @@ export const ModelSelect = ({ value, onChange, models = AVAILABLE_MODELS, curren
       : models[0]);
   const modelMapping = readClaudeModelMapping();
 
+  // 模型按钮是否显示 1M 上下文后缀：仅 Claude 且模型支持且已启用（与 append1MContextSuffix 判定保持一致）
+  const shouldShow1MContextSuffix = currentProvider === 'claude'
+    && modelSupports1MContext(currentModel.id)
+    && longContextEnabled;
+
   const isSelectedModel = (modelId: string): boolean => {
     if (currentProvider !== 'claude') {
       return modelId === strippedValue;
@@ -309,7 +314,13 @@ export const ModelSelect = ({ value, onChange, models = AVAILABLE_MODELS, curren
           size={12}
           colored
         />
-        <span className="selector-button-text">{getModelLabel(currentModel, true)}</span>
+        {/* 模型名与 1M 后缀分开渲染，便于收窄模式下用 CSS 单独隐藏后缀 */}
+        <span className="selector-button-text">
+          {getModelLabel(currentModel, false)}
+          {shouldShow1MContextSuffix && (
+            <span className="selector-model-1m">{` (${t('models.longContext.shortLabel')})`}</span>
+          )}
+        </span>
         <span className={`codicon codicon-chevron-${isOpen ? 'up' : 'down'}`} style={CHEVRON_ICON_STYLE} />
       </button>
 
