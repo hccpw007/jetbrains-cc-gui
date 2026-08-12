@@ -701,12 +701,20 @@ public class ProviderManager {
                 if (claudeSettings != null && claudeSettings.has("env")) {
                     JsonObject fullEnv = claudeSettings.getAsJsonObject("env");
                     JsonObject safeEnv = new JsonObject();
-                    // Only copy model-mapping keys — never credentials
+                    // Only copy model-mapping keys — never credentials. Both the slot
+                    // mapping (*_MODEL) and the real routed model names (*_MODEL_NAME)
+                    // are included so the webview can display the actual model.
                     String[] modelMappingKeys = {
                         "ANTHROPIC_MODEL",
+                        "ANTHROPIC_MODEL_NAME",
+                        "ANTHROPIC_DEFAULT_FABLE_MODEL",
+                        "ANTHROPIC_DEFAULT_FABLE_MODEL_NAME",
                         "ANTHROPIC_DEFAULT_SONNET_MODEL",
+                        "ANTHROPIC_DEFAULT_SONNET_MODEL_NAME",
                         "ANTHROPIC_DEFAULT_OPUS_MODEL",
-                        "ANTHROPIC_DEFAULT_HAIKU_MODEL"
+                        "ANTHROPIC_DEFAULT_OPUS_MODEL_NAME",
+                        "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+                        "ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME"
                     };
                     for (String key : modelMappingKeys) {
                         if (fullEnv.has(key) && !fullEnv.get(key).isJsonNull()) {
