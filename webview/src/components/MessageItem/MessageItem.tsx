@@ -763,51 +763,57 @@ export const MessageItem = memo(function MessageItem({
         {renderGroupedBlocks()}
       </div>
 
-      {/* Duration and token display after last assistant message */}
+      {/* Duration and token display after last assistant message — first row shows
+          elapsed time plus turn cost (detailed output), second row shows token usage */}
       {message.type === 'assistant' && !isMessageStreaming && typeof message.durationMs === 'number' && (
-        <div className="message-duration">
-          <span className="message-duration-inner">
-            <span className="message-duration-flag codicon codicon-clock"></span>
-            <span className="message-duration-cost">{t('chat.totalDuration')}</span>
-            <span className="message-duration-value">{formatDurationMs(message.durationMs)}</span>
-            {(() => {
-              const tokenInfo = extractTokenUsage(message.raw);
-              if (!tokenInfo) return null;
-              const cacheHitRatio = detailedOutputEnabled ? formatCacheHitRatio(tokenInfo) : null;
-              const cacheHitLabel = cacheHitRatio
-                ? t('chat.cacheHitsWithRatio', {
-                  tokens: formatTokenCount(tokenInfo.cacheReadTokens),
-                  ratio: cacheHitRatio,
-                })
-                : '';
-              return (
-                <>
-                  <span className="message-duration-separator">·</span>
-                  <span
-                    className="message-duration-tokens"
-                    title={t('chat.tokenUsageDetail', {
-                      input: formatTokenCount(tokenInfo.nonCacheInputTokens),
-                      cacheWrite: formatTokenCount(tokenInfo.cacheCreationTokens),
-                      cacheRead: formatTokenCount(tokenInfo.cacheReadTokens),
-                      output: formatTokenCount(tokenInfo.outputTokens),
-                    })}
-                  >
-                    {t('chat.tokenUsage', {
-                      input: `${formatTokenCount(tokenInfo.inputTokens)}${cacheHitLabel}`,
-                      output: formatTokenCount(tokenInfo.outputTokens),
-                    })}
-                  </span>
-                  {detailedOutputEnabled && tokenInfo.costUsd !== undefined && (
+        (() => {
+          const tokenInfo = extractTokenUsage(message.raw);
+          const cacheHitRatio = tokenInfo && detailedOutputEnabled ? formatCacheHitRatio(tokenInfo) : null;
+          const cacheHitLabel =
+            cacheHitRatio && tokenInfo
+              ? t('chat.cacheHitsWithRatio', {
+                tokens: formatTokenCount(tokenInfo.cacheReadTokens),
+                ratio: cacheHitRatio,
+              })
+              : '';
+          return (
+            <div className="message-duration">
+              <div className="message-duration-inner">
+                {/* First row: elapsed time, plus turn cost when detailed output is enabled */}
+                <div className="message-duration-row">
+                  <span className="message-duration-flag codicon codicon-clock"></span>
+                  <span className="message-duration-cost">{t('chat.totalDuration')}</span>
+                  <span className="message-duration-value">{formatDurationMs(message.durationMs)}</span>
+                  {detailedOutputEnabled && tokenInfo && tokenInfo.costUsd !== undefined && (
                     <>
                       <span className="message-duration-separator">·</span>
                       <span className="message-duration-tokens">{formatUsdCost(tokenInfo.costUsd)}</span>
                     </>
                   )}
-                </>
-              );
-            })()}
-          </span>
-        </div>
+                </div>
+                {/* Second row: whole-turn token usage (input incl. cache hits, output) */}
+                {tokenInfo && (
+                  <div className="message-duration-row">
+                    <span
+                      className="message-duration-tokens"
+                      title={t('chat.tokenUsageDetail', {
+                        input: formatTokenCount(tokenInfo.nonCacheInputTokens),
+                        cacheWrite: formatTokenCount(tokenInfo.cacheCreationTokens),
+                        cacheRead: formatTokenCount(tokenInfo.cacheReadTokens),
+                        output: formatTokenCount(tokenInfo.outputTokens),
+                      })}
+                    >
+                      {t('chat.tokenUsage', {
+                        input: `${formatTokenCount(tokenInfo.inputTokens)}${cacheHitLabel}`,
+                        output: formatTokenCount(tokenInfo.outputTokens),
+                      })}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })()
       )}
     </div>
   );
