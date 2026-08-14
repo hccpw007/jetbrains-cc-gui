@@ -67,6 +67,11 @@ export async function sendMessage(
     error: (...args) => console.error(...args),
   });
 
+  // Do NOT begin() before ACP session is ready. session/load (multi-turn resume)
+  // and /always-approve can re-emit prior-turn thought/text; opening the UI stream
+  // early paints that history under the new user bubble. begin() on prompt_phase_start.
+  let streamOpen = false;
+
   try {
     const preferredAuth = authMethodOpt || process.env.GROK_AUTH_METHOD || '';
     // OAuth empty → ~/.grok/config.toml api_key (or plugin key). Resolved once here;
@@ -94,8 +99,6 @@ export async function sendMessage(
       reasoningEffort: reasoningEffort || '(none)',
     });
 
-    normalizer.begin();
-
     const env = buildGrokEnv(
       process.env,
       resolvedAuth.apiKey,
@@ -120,7 +123,25 @@ export async function sendMessage(
       openedFiles,
       attachments: atts,
       env,
-      onEvent: (type, payload) => normalizer.handleAcpEvent(type, payload),
+      onEvent: (type, payload) => {
+        if (type === 'prompt_phase_start') {
+          if (!streamOpen) {
+            normalizer.begin();
+            streamOpen = true;
+          }
+          return;
+        }
+        if (type === 'session_id') {
+          normalizer.handleAcpEvent(type, payload);
+          return;
+        }
+        // Defense in depth: ignore pre-prompt notifications even if the ACP
+        // client gate regresses.
+        if (!streamOpen) {
+          return;
+        }
+        normalizer.handleAcpEvent(type, payload);
+      },
       onStderr: (chunk) => {
         // Keep stderr for diagnostics only — never pollute JSON-RPC stdout
         const s = String(chunk || '').trim();
@@ -130,9 +151,18 @@ export async function sendMessage(
       },
     });
 
+    if (!streamOpen) {
+      // Prompt phase never started (e.g. failed earlier) — still open for finish.
+      normalizer.begin();
+      streamOpen = true;
+    }
     normalizer.finishSuccess(result.sessionId, normalizer.assistantText);
   } catch (error) {
     console.error('[DEBUG] Grok ACP error:', error?.message || error);
+    if (!streamOpen) {
+      normalizer.begin();
+      streamOpen = true;
+    }
     normalizer.finishError(error);
   }
 }

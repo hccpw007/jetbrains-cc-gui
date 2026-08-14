@@ -72,7 +72,8 @@ public class ModelProviderHandler {
         MODEL_CONTEXT_LIMITS.put("grok-beta", 128_000);
         MODEL_CONTEXT_LIMITS.put("grok", 500_000);
         MODEL_CONTEXT_LIMITS.put("grok-1.5", 128_000);
-        MODEL_CONTEXT_LIMITS.put("grok-4.5", 500_000);
+        MODEL_CONTEXT_LIMITS.put("grok-4.6", 500_000);
+        MODEL_CONTEXT_LIMITS.put("grok-4.5", 500_000); // legacy alias
         MODEL_CONTEXT_LIMITS.put("grok-4", 500_000);
         MODEL_CONTEXT_LIMITS.put("grok-build", 500_000);
     }

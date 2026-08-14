@@ -2,13 +2,12 @@ import { useCallback, useMemo, useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ButtonAreaProps, CodexFastMode, ModelInfo, PermissionMode, ReasoningEffort } from './types';
 import { CodexFastModeSelect, ConfigSelect, ModelSelect, ModeSelect, ProviderSelect, ReasoningSelect } from './selectors';
-import { CLAUDE_MODELS, CODEX_MODELS, GROK_MODELS } from './types';
-import { buildCodexModelList } from './codexModelList';
 import { STORAGE_KEYS, validateCodexCustomModels } from '../../types/provider';
 import type { CodexCustomModel } from '../../types/provider';
 import { readClaudeModelMapping } from '../../utils/claudeModelMapping';
 import { useCliModels } from '../../hooks/providers/useCliModels';
 import { useToolbarSelectorCompact } from './hooks/useToolbarSelectorCompact';
+import { resolveProviderModels } from './resolveProviderModels';
 
 /**
  * Get custom Codex model list from localStorage
@@ -130,82 +129,33 @@ export const ButtonArea = ({
     };
   }, []);
 
-  /**
-   * Apply model name mapping
-   * Maps base model IDs to actual model names (e.g., versions with capacity suffixes)
-   */
-  const applyModelMapping = useCallback((model: ModelInfo, mapping: { main?: string; haiku?: string; sonnet?: string; opus?: string }): ModelInfo => {
-    const modelKeyMap: Record<string, keyof typeof mapping> = {
-      'claude-sonnet-5': 'sonnet',
-      'claude-sonnet-4-7': 'sonnet',
-      'claude-sonnet-4-6': 'sonnet',
-      'claude-opus-5': 'opus',
-      'claude-opus-4-8': 'opus',
-      'claude-haiku-4-5': 'haiku',
-    };
-
-    const key = modelKeyMap[model.id];
-    const resolvedMapping = (key ? mapping[key] : undefined) || mapping.main;
-    if (resolvedMapping) {
-      const actualModel = String(resolvedMapping).trim();
-      if (actualModel.length > 0) {
-        // Keep the original id as unique identifier, only modify label to custom name
-        // This ensures id remains unique even if multiple models share the same displayName
-        return { ...model, label: actualModel };
-      }
-    }
-    return model;
-  }, []);
-
-  // Select model list based on current provider
-  // customModelsVersion triggers recalculation when localStorage changes
+  // Select model list based on current provider — shared with Prompt Enhancer /
+  // Commit AI settings so the three surfaces never diverge.
+  // customModelsVersion triggers recalculation when localStorage changes.
   const availableModels = useMemo(() => {
-    if (currentProvider === 'codex') {
-      const customModels = getCustomCodexModels();
-      // Real catalog entries only (config default / model_catalog_json). When
-      // empty, cliModels is the static CODEX_MODELS fallback from useCliModels —
-      // pass [] so built-ins are applied once via the third argument, not twice.
-      const catalogModels = cliCatalogHasEntries ? cliModels : [];
-      // customs → catalog → built-ins (deduped). Keeps plugin customs and the
-      // full built-in lineup even when a custom provider only returns its default.
-      return buildCodexModelList(catalogModels, customModels, CODEX_MODELS);
-    }
-    if (currentProvider === 'grok') {
-      return GROK_MODELS;
-    }
-    if (currentProvider === 'kimi' || currentProvider === 'opencode' || currentProvider === 'pi') {
-      return cliModels;
-    }
-    if (typeof window === 'undefined' || !window.localStorage) {
-      return CLAUDE_MODELS;
-    }
-
-    // Apply model mapping to built-in models
-    let builtInModels = CLAUDE_MODELS;
+    let claudeMapping = null;
     try {
-      const mapping = readClaudeModelMapping();
-      if (Object.keys(mapping).length > 0) {
-        builtInModels = CLAUDE_MODELS.map((m) => applyModelMapping(m, mapping));
-      }
+      claudeMapping = readClaudeModelMapping();
     } catch {
-      // ignore
+      claudeMapping = null;
     }
-
-    // Merge custom models (displayed before built-in models)
-    const customModels = getCustomClaudeModels();
-    if (customModels.length === 0) {
-      return builtInModels;
-    }
-    // Filter out built-in models that duplicate custom models
-    const customIds = new Set(customModels.map(m => m.id));
-    const filteredBuiltIn = builtInModels.filter(m => !customIds.has(m.id));
-    return [...customModels, ...filteredBuiltIn];
-  }, [currentProvider, applyModelMapping, customModelsVersion, cliModels, cliCatalogHasEntries]);
+    return resolveProviderModels({
+      provider: currentProvider,
+      cliModels,
+      cliCatalogHasEntries,
+      claudeCustomModels: getCustomClaudeModels(),
+      codexCustomModels: getCustomCodexModels(),
+      claudeMapping,
+    });
+    // customModelsVersion intentionally forces re-read of localStorage customs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentProvider, customModelsVersion, cliModels, cliCatalogHasEntries]);
 
   // When a dynamic model catalog arrives, ensure selection is a real entry.
   useEffect(() => {
     const isDynamicProvider = currentProvider === 'kimi' || currentProvider === 'opencode'
-      || currentProvider === 'pi' || currentProvider === 'codex';
+      || currentProvider === 'pi' || currentProvider === 'codex'
+      || currentProvider === 'grok';
     if (!isDynamicProvider) return;
     // Only correct once a *real* catalog arrived. Static fallback lists
     // (OPENCODE_MODELS = just "opencode-default", CODEX built-ins, …) must not
@@ -288,7 +238,7 @@ export const ButtonArea = ({
     onEnhancePrompt?.();
   }, [onEnhancePrompt]);
 
-  // Collapse selector labels for every CLI when left cluster is about to hit the send cluster (20px).
+  // Collapse selector labels for every CLI when left cluster is about to hit the send cluster (10px).
   const buttonAreaRef = useRef<HTMLDivElement>(null);
   const buttonAreaLeftRef = useRef<HTMLDivElement>(null);
   const buttonAreaRightRef = useRef<HTMLDivElement>(null);

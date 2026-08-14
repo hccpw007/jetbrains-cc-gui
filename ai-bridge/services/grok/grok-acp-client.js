@@ -17,9 +17,14 @@ import {
   normalizeAuthMethod,
   applyGrokBaseUrlEnv,
   resolveEffectiveGrokAuth,
+  normalizeGrokModelId,
 } from './grok-utils.js';
 import { requestPermissionFromJava } from '../../permission-ipc.js';
 import { AcpTerminalHost, isTerminalMethod } from './acp-terminal-host.js';
+import {
+  buildGrokImageBlocks,
+  GROK_IMAGE_ONLY_FALLBACK_TEXT,
+} from '../../utils/cli-image-input.js';
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 
@@ -138,13 +143,15 @@ export async function ensureSession(client, { sessionId = '', cwd = '', model = 
     }
   }
 
+  const effectiveModel = normalizeGrokModelId(model);
+
   if (!activeSessionId) {
     const newParams = {
       cwd: workCwd,
       mcpServers: [],
     };
-    if (model && model.trim()) {
-      newParams._meta = { ...(newParams._meta || {}), modelId: model.trim() };
+    if (effectiveModel) {
+      newParams._meta = { ...(newParams._meta || {}), modelId: effectiveModel };
     }
     sessionMeta = await client.request('session/new', newParams);
     activeSessionId = sessionMeta.sessionId || sessionMeta.session?.sessionId || '';
@@ -157,11 +164,11 @@ export async function ensureSession(client, { sessionId = '', cwd = '', model = 
   client.activeSessionId = activeSessionId;
 
   // Best-effort model set
-  if (model && model.trim()) {
+  if (effectiveModel) {
     try {
       await client.request('session/set_model', {
         sessionId: activeSessionId,
-        modelId: model.trim(),
+        modelId: effectiveModel,
       });
     } catch {
       // optional
@@ -605,7 +612,22 @@ export async function runAcpTurn({
   onEvent,
   onStderr,
 }) {
+  // Until the real user session/prompt starts, suppress stream-like events.
+  // session/load and /always-approve can re-emit prior-turn thought/text chunks;
+  // if those land after [STREAM_START] the UI paints the previous answer under
+  // the new user bubble (multi-turn duplicate render).
+  let liveStreaming = false;
+  const PRE_PROMPT_EVENTS = new Set([
+    'session_id',
+    'prompt_phase_start',
+    'initialized',
+    'authenticated',
+    'session_new',
+  ]);
   const emit = (type, payload) => {
+    if (!liveStreaming && !PRE_PROMPT_EVENTS.has(type)) {
+      return;
+    }
     if (typeof onEvent === 'function') onEvent(type, payload);
   };
 
@@ -648,6 +670,7 @@ export async function runAcpTurn({
     // Agent may also call session/request_permission first; double-gate is OK.
     authorizeCreate: async (info) => {
       if (isAutoApproveMode(effectiveMode)) return true;
+      if (isDenyAllMode(effectiveMode)) return false;
       try {
         return await requestPermissionFromJava('run_terminal_command', {
           command: info.commandLine || info.command,
@@ -716,6 +739,7 @@ export async function runAcpTurn({
 
     // Always sync always-approve with mode (default must turn it OFF so the agent
     // keeps requesting session/request_permission instead of silent auto-run).
+    // Keep liveStreaming=false: this control prompt must not enter the UI stream.
     await applyPermissionModeToSession(client, activeSessionId, effectiveMode);
 
     const promptBlocks = buildPromptBlocks({
@@ -724,6 +748,10 @@ export async function runAcpTurn({
       openedFiles,
       attachments,
     });
+
+    // Signal the normalizer to open [STREAM_START] only for the user turn.
+    emit('prompt_phase_start', {});
+    liveStreaming = true;
 
     const promptResult = await client.request(
       'session/prompt',
@@ -876,6 +904,16 @@ function isAcceptEditsMode(permissionMode) {
   return m === 'acceptedits' || m === 'accept_edits' || m === 'accept-edits';
 }
 
+/**
+ * Session-less one-shot asks (commit message / prompt enhancer) cannot render
+ * a permission dialog. 'deny' auto-rejects every tool request instead of
+ * auto-approving, so injected prompt text cannot drive tool execution.
+ */
+export function isDenyAllMode(permissionMode) {
+  const m = String(permissionMode || '').trim().toLowerCase();
+  return m === 'deny' || m === 'denyall' || m === 'deny-all' || m === 'never';
+}
+
 function isExecutionLike(toolName, kind, input) {
   if (kind === 'execute') return true;
   if (/bash|shell|terminal|execute|command|run_terminal/i.test(String(toolName || ''))) return true;
@@ -894,6 +932,23 @@ export async function resolveAcpPermissionDecision(
 ) {
   const info = extractPermissionToolInfo(params || {});
   const { toolName, input, kind, options } = info;
+
+  if (isDenyAllMode(permissionMode)) {
+    const rejectId = pickOptionId(
+      options,
+      ['reject-once', 'reject_once', 'reject', 'deny', 'cancel', 'cancelled'],
+      null
+    );
+    return {
+      allowed: false,
+      optionId: rejectId,
+      toolName,
+      source: 'deny-all',
+      response: rejectId
+        ? { outcome: { outcome: 'selected', optionId: rejectId } }
+        : { outcome: { outcome: 'cancelled' } },
+    };
+  }
 
   if (autoApprove || isAutoApproveMode(permissionMode)) {
     const optionId = pickOptionId(
@@ -990,6 +1045,16 @@ export function isAutoApproveMode(permissionMode) {
   );
 }
 
+/**
+ * Build ACP prompt content blocks for a Grok turn.
+ *
+ * Multimodal (aligned with desktop-cc-gui / grok headless):
+ *   text:  { type: "text", text }
+ *   image: { type: "image", mimeType: "image/png", data: "<base64>" }
+ *
+ * When the user only attaches images with empty text, inject
+ * GROK_IMAGE_ONLY_FALLBACK_TEXT so the payload stays valid.
+ */
 export function buildPromptBlocks({ message, agentPrompt, openedFiles, attachments }) {
   const blocks = [];
   let text = message || '';
@@ -1026,14 +1091,40 @@ export function buildPromptBlocks({ message, agentPrompt, openedFiles, attachmen
     }
   }
 
-  if (Array.isArray(attachments) && attachments.length > 0) {
+  const { blocks: imageBlocks, loaded, errors } = buildGrokImageBlocks(
+    Array.isArray(attachments) ? attachments : []
+  );
+  if (errors.length > 0) {
+    console.error(
+      `[Grok] image load issues: ${loaded} ok, ${errors.length} failed (${errors.join('; ')})`
+    );
+  }
+  if (loaded > 0) {
+    console.error(`[Grok] embedding ${loaded} image block(s) into ACP prompt`);
+  }
+
+  // Non-image attachments (or failed images): keep a text note so the agent
+  // still knows something was attached.
+  if (Array.isArray(attachments) && attachments.length > 0 && loaded === 0) {
     const names = attachments
       .map((a) => a?.fileName || a?.name || 'attachment')
       .join(', ');
     text += `\n\n## Attachments\nUser attached: ${names}`;
-    // Image binary support depends on promptCapabilities.image (false on current CLI)
   }
 
-  blocks.push({ type: 'text', text });
+  const trimmedText = String(text || '').trim();
+  if (trimmedText) {
+    blocks.push({ type: 'text', text });
+  } else if (imageBlocks.length > 0) {
+    // Grok requires at least one text content block with multimodal payloads.
+    blocks.push({ type: 'text', text: GROK_IMAGE_ONLY_FALLBACK_TEXT });
+  } else {
+    blocks.push({ type: 'text', text: text || '' });
+  }
+
+  for (const imageBlock of imageBlocks) {
+    blocks.push(imageBlock);
+  }
+
   return blocks;
 }

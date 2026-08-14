@@ -233,11 +233,20 @@
         "providerUnavailable": "Currently unavailable",
         "provider": {
           "claude": "Claude Code",
-          "codex": "Codex"
+          "codex": "Codex",
+          "grok": "Grok CLI",
+          "kimi": "Kimi CLI",
+          "opencode": "OpenCode",
+          "pi": "PI CLI"
         },
         "currentProviderAuto": "Currently using automatic selection: {{provider}}",
         "currentProviderManual": "Currently using manually selected provider: {{provider}}",
-        "currentProviderUnavailable": "The selected provider is currently unavailable: {{provider}}"
+        "currentProviderUnavailable": "The selected provider is currently unavailable: {{provider}}",
+        "modeLabel": "선택 방식",
+        "modeAuto": "자동",
+        "modeManual": "수동",
+        "autoSummary": "현재 채팅 CLI를 따름 · 현재 {{provider}}",
+        "autoUnavailable": "사용 가능한 CLI가 없습니다. 수동으로 전환해 선택하세요."
       },
       "diffExpanded": {
         "label": "Diff 기본 펼침",
@@ -433,7 +442,12 @@
         "providerUnavailable": "사용 불가",
         "currentProviderAuto": "현재 자동 선택 사용 중: {{provider}}",
         "currentProviderManual": "현재 수동 선택된 제공자 사용 중: {{provider}}",
-        "currentProviderUnavailable": "선택된 제공자를 현재 사용할 수 없습니다: {{provider}}"
+        "currentProviderUnavailable": "선택된 제공자를 현재 사용할 수 없습니다: {{provider}}",
+        "modeLabel": "선택 방식",
+        "modeAuto": "자동",
+        "modeManual": "수동",
+        "autoSummary": "현재 채팅 CLI를 따름 · 현재 {{provider}}",
+        "autoUnavailable": "사용 가능한 CLI가 없습니다. 수동으로 전환해 선택하세요."
       },
       "prompt": {
         "label": "추가 프롬프트",
@@ -1157,7 +1171,13 @@
   "markdown": {
     "copyCode": "코드 복사",
     "copyMessage": "메시지 복사",
-    "copySuccess": "복사됨!"
+    "copySuccess": "복사됨!",
+    "quoteMessage": "메시지 인용",
+    "quoteSuccess": "인용됨!"
+  },
+  "contextMenu": {
+    "copy": "복사",
+    "quote": "인용"
   },
   "usage": {
     "checkingLabel": "tokentracker-cli 확인 중…",
@@ -1411,6 +1431,25 @@
     "allCompleted": "모두 완료 {{completed}}/{{total}} 작업",
     "stopped": "중단됨"
   },
+  "subagent": {
+    "process": {
+      "title": "에이전트 프로세스",
+      "prompt": "프롬프트",
+      "thought": "생각",
+      "filesRead_one": "파일 {{count}}개 읽기",
+      "filesRead_other": "파일 {{count}}개 읽기",
+      "otherTools": "기타 도구",
+      "result": "결과",
+      "showFullOutput": "전체 출력 보기",
+      "loading": "에이전트 프로세스 로드 중…",
+      "unavailable": "세션에 id가 생기기 전까지 프로세스 로그를 사용할 수 없습니다.",
+      "reportGenerated": "구조화된 분석 보고서가 생성됨",
+      "unitMs": "ms",
+      "unitS": "초",
+      "unitTools": "도구",
+      "unitTokens": "토큰"
+    }
+  },
   "statusPanel": {
     "todoTab": "계획",
     "tasksTab": "작업",
@@ -1585,6 +1624,9 @@
     "searchPlaceholder": "모델 검색",
     "noModelsFound": "모델을 찾을 수 없습니다",
     "hiddenModelCount": "+ {{count}}개 모델 더 있음. 입력하여 검색하세요.",
+    "pinned": "고정",
+    "pin": "고정",
+    "unpin": "고정 해제",
     "claude": {
       "sonnet46": {
         "label": "Sonnet 4.6",
@@ -1727,7 +1769,18 @@
     "keepOriginal": "원본 유지",
     "enhanceFailed": "프롬프트 강화 실패",
     "emptyPrompt": "먼저 프롬프트를 입력해주세요",
-    "copyEnhanced": "강화된 프롬프트 복사"
+    "copyEnhanced": "강화된 프롬프트 복사",
+    "modeLabel": "모드",
+    "modeAuto": "자동",
+    "modeManual": "수동",
+    "modeUnavailable": "사용 불가",
+    "providerLabel": "CLI",
+    "providerUnresolved": "CLI 미확인",
+    "modelLabel": "모델",
+    "modelUnresolved": "기본 모델",
+    "openSettings": "설정",
+    "openSettingsTooltip": "프롬프트 강화 설정 열기",
+    "resolvingUsage": "실행 설정 확인 중…"
   },
   "fileContext": {
     "placeholder": "파일 컨텍스트",

@@ -68,6 +68,10 @@ public class StreamMessageCoalescer {
     // lock-protected fields.  This is intentional: a one-cycle stale read only means the
     // interval adapts one push later — acceptable for a best-effort throttling heuristic.
     private volatile int lastPayloadChars = 0;
+    // Highest sequence actually handed to the webview. Ordering is enforced against THIS,
+    // not against updateSequence: updateSequence only means "newer data is queued", which
+    // is not a reason to drop the in-flight frame. See sendToWebView for why that matters.
+    private volatile long lastPushedSequence = 0L;
     private volatile List<ClaudeSession.Message> pendingMessages = null;
     private volatile List<ClaudeSession.Message> lastSnapshot = null;
     private volatile List<ClaudeSession.Message> lastDeliveredSnapshot = null;
@@ -172,7 +176,10 @@ public class StreamMessageCoalescer {
             lastDeliveredSnapshot = null;
             lastUpdateAtMs = 0L;
             lastPayloadChars = 0;
-            return ++updateSequence;
+            // Raise the ordering floor as well: frames still in flight from the previous
+            // session carry a smaller sequence and must not repopulate the list we cleared.
+            lastPushedSequence = ++updateSequence;
+            return lastPushedSequence;
         }
     }
 
@@ -368,33 +375,35 @@ public class StreamMessageCoalescer {
 
                 final long pushSequence;
                 synchronized (lock) {
-                    if (sequence != updateSequence) {
-                        // Stale snapshot: a newer one is pending or was just pushed,
-                        // so normally we skip this push. Force-push ONLY on the flush
-                        // path (afterSendOnEdt != null) - that is the onStreamEnd flush
-                        // carrying the turn's FINAL snapshot, and when a late enqueue
-                        // has advanced updateSequence past it, no newer snapshot will
-                        // compensate, so the turn's tail content would be lost for good.
-                        // The alarm path (afterSendOnEdt == null) holds a possibly
-                        // outdated snapshot; force-pushing it would advance the sequence
-                        // and let a stale frame overwrite the final one once its
-                        // (large-payload-delayed) invokeLater lands after the flush.
-                        // Advancing the sequence on force-push keeps the frontend's
-                        // minAcceptedUpdateSequence barrier accepting the frame.
-                        if (streamActive || afterSendOnEdt == null) {
-                            if (afterSendOnEdt != null) {
-                                afterSendOnEdt.accept(sequence);
-                            }
-                            return;
+                    // Drop ONLY genuinely out-of-order frames: a snapshot whose
+                    // (large-payload-delayed) invokeLater lands after a newer one already
+                    // reached the webview would roll the list backwards.
+                    //
+                    // A frame that is merely older than `updateSequence` is NOT stale.
+                    // Snapshots grow monotonically within a turn, so a frame whose
+                    // sequence is >= the last pushed one carries content that is a
+                    // superset of whatever the webview already shows — pushing it is
+                    // forward progress, never a regression, even if a newer one is still
+                    // queued. The previous `sequence != updateSequence` check treated
+                    // "newer data is queued" as "this frame is obsolete" and dropped it.
+                    // Because the payload serializes off-EDT, any enqueue arriving in
+                    // that window advanced updateSequence, so frame after frame was
+                    // discarded during dense streaming and structural blocks
+                    // (tool_use / tool_result) never reached the frontend until the
+                    // stream-end flush. Meanwhile onContentDelta kept flowing, so text
+                    // was appended to whichever assistant message the frontend last knew
+                    // about.
+                    //
+                    // The frontend's __minAcceptedUpdateSequence guard applies the same
+                    // ordering rule on its side, so this is not the only line of defence.
+                    if (sequence < lastPushedSequence) {
+                        if (afterSendOnEdt != null) {
+                            afterSendOnEdt.accept(sequence);
                         }
-                        pushSequence = ++updateSequence;
-                        LOG.info("[StreamMessageCoalescer] Force-pushing stale final snapshot after"
-                                + " stream end (stale sequence=" + sequence
-                                + ", pushed=" + pushSequence
-                                + ") to avoid losing the turn's final content");
-                    } else {
-                        pushSequence = sequence;
+                        return;
                     }
+                    pushSequence = sequence;
+                    lastPushedSequence = sequence;
                 }
 
                 // FIX: Wrap callJavaScript in try-catch so that a JCEF failure
@@ -412,9 +421,13 @@ public class StreamMessageCoalescer {
                         callbackTarget.callJavaScript("updateMessages", escapedMessagesJson, String.valueOf(pushSequence));
                     }
                     synchronized (lock) {
-                        if (pushSequence == updateSequence) {
-                            lastDeliveredSnapshot = messages;
-                        }
+                        // Unconditional: this frame reached the webview, so it becomes the
+                        // prefix baseline for tail transport. Gating this on
+                        // `pushSequence == updateSequence` froze the baseline for as long as
+                        // newer data stayed queued, so hasSamePrefix never matched, tail
+                        // updates never engaged on long conversations, and every push kept
+                        // paying full-payload serialization cost.
+                        lastDeliveredSnapshot = messages;
                     }
                     MessageJsonConverter.pushUsageUpdateFromMessages(
                             messages,

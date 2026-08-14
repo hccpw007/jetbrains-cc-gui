@@ -170,4 +170,72 @@ describe('ModelSelect', () => {
     expect(screen.getByTestId('model-loading')).toBeTruthy();
     expect(screen.queryByTestId('model-load-error')).toBeNull();
   });
+
+  const openCodeModels: ModelInfo[] = [
+    { id: 'opencode/big-pickle', label: 'opencode/Big-Pickle', description: 'opencode/big-pickle' },
+    { id: 'opencode/longcat-2.0-free', label: 'opencode/Longcat-2.0-Free', description: 'opencode/longcat-2.0-free' },
+    { id: 'anthropic/claude-sonnet-4', label: 'anthropic/Claude-Sonnet-4', description: 'anthropic/claude-sonnet-4' },
+    { id: 'deepseek/deepseek-v4-flash-free', label: 'deepseek/Deepseek-V4-Flash-Free', description: 'deepseek/deepseek-v4-flash-free' },
+    { id: 'xiaomi/mimo-v2.5-free', label: 'xiaomi/Mimo-V2.5-Free', description: 'xiaomi/mimo-v2.5-free' },
+    { id: 'laguna/laguna-s-2.1-free', label: 'laguna/Laguna-S-2.1-Free', description: 'laguna/laguna-s-2.1-free' },
+    { id: 'ling/ling-3.0-tiny-free', label: 'ling/Ling-3.0-Tiny-Free', description: 'ling/ling-3.0-tiny-free' },
+    { id: 'nvidia/nemotron-3-ultra-free', label: 'nvidia/Nemotron-3-Ultra-Free', description: 'nvidia/nemotron-3-ultra-free' },
+  ];
+
+  it('OpenCode 长列表应显示搜索并按 provider 分组', () => {
+    render(
+      <ModelSelect
+        value="opencode/big-pickle"
+        onChange={vi.fn()}
+        models={openCodeModels}
+        currentProvider="opencode"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button'));
+    expect(screen.getByTestId('model-search-input')).toBeTruthy();
+    expect(screen.getByTestId('model-group-opencode')).toBeTruthy();
+    expect(screen.getByTestId('model-group-anthropic')).toBeTruthy();
+    expect(screen.getByTestId('model-group-deepseek')).toBeTruthy();
+  });
+
+  it('搜索应过滤模型并隐藏空分组', () => {
+    render(
+      <ModelSelect
+        value="opencode/big-pickle"
+        onChange={vi.fn()}
+        models={openCodeModels}
+        currentProvider="opencode"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button'));
+    fireEvent.change(screen.getByTestId('model-search-input'), {
+      target: { value: 'deepseek' },
+    });
+
+    expect(screen.getByTestId('model-option-deepseek/deepseek-v4-flash-free')).toBeTruthy();
+    expect(screen.queryByTestId('model-option-opencode/big-pickle')).toBeNull();
+    // Empty vendor groups disappear; a single remaining match stays flat (no group header).
+    expect(screen.queryByTestId('model-group-opencode')).toBeNull();
+    expect(screen.queryByTestId('model-group-deepseek')).toBeNull();
+  });
+
+  it('置顶后模型应出现在 Pinned 分组顶部', () => {
+    render(
+      <ModelSelect
+        value="opencode/big-pickle"
+        onChange={vi.fn()}
+        models={openCodeModels}
+        currentProvider="opencode"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button'));
+    fireEvent.click(screen.getByTestId('model-pin-deepseek/deepseek-v4-flash-free'));
+
+    expect(screen.getByTestId('model-group-__pinned__')).toBeTruthy();
+    const pinnedSection = screen.getByTestId('model-section-__pinned__');
+    expect(pinnedSection.textContent).toContain('deepseek/Deepseek-V4-Flash-Free');
+  });
 });

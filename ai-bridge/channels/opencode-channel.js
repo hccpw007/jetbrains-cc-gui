@@ -21,16 +21,18 @@ export async function handleOpenCodeCommand(command, args, stdinData) {
           cwd,
           model,
           reasoningEffort,
+          attachments,
         } = stdinData;
         await openCodeSendMessage(
           message,
           sessionId || '',
           cwd || '',
           model || '',
-          reasoningEffort || ''
+          reasoningEffort || '',
+          attachments || []
         );
       } else {
-        await openCodeSendMessage(args[0], args[1], args[2], args[3], args[4]);
+        await openCodeSendMessage(args[0], args[1], args[2], args[3], args[4], []);
       }
       break;
     }

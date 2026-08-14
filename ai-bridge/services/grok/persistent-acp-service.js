@@ -34,6 +34,7 @@ import {
   extractUsedTokens,
   extractUsageFromAcpEnvelope,
   resolveEffectiveGrokAuth,
+  normalizeGrokModelId,
 } from './grok-utils.js';
 import { requestPermissionFromJava } from '../../permission-ipc.js';
 import { AcpTerminalHost } from './acp-terminal-host.js';
@@ -77,7 +78,7 @@ function makeRuntimeKey(params) {
   const epoch = params.runtimeSessionEpoch || params.epoch || 'default';
   const sid = (params.sessionId || '').trim() || 'new';
   const cwd = (params.cwd || process.cwd()).trim();
-  const model = (params.model || '').trim();
+  const model = normalizeGrokModelId(params.model);
   const perm = normalizePermissionMode(params.permissionMode);
   // authFingerprint: presence only (never secrets)
   const authMethod = String(params.authMethod || process.env.GROK_AUTH_METHOD || 'oauth').toLowerCase();

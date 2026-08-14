@@ -233,11 +233,20 @@
         "providerUnavailable": "Currently unavailable",
         "provider": {
           "claude": "Claude Code",
-          "codex": "Codex"
+          "codex": "Codex",
+          "grok": "Grok CLI",
+          "kimi": "Kimi CLI",
+          "opencode": "OpenCode",
+          "pi": "PI CLI"
         },
         "currentProviderAuto": "Currently using automatic selection: {{provider}}",
         "currentProviderManual": "Currently using manually selected provider: {{provider}}",
-        "currentProviderUnavailable": "The selected provider is currently unavailable: {{provider}}"
+        "currentProviderUnavailable": "The selected provider is currently unavailable: {{provider}}",
+        "modeLabel": "Modo de selección",
+        "modeAuto": "Auto",
+        "modeManual": "Manual",
+        "autoSummary": "Sigue el CLI del chat actual · actualmente {{provider}}",
+        "autoUnavailable": "No hay CLI disponible. Cambia a Manual para elegir uno."
       },
       "diffExpanded": {
         "label": "Expandir diferencias por defecto",
@@ -422,7 +431,12 @@
         "providerUnavailable": "No disponible",
         "currentProviderAuto": "Actualmente usando selección automática: {{provider}}",
         "currentProviderManual": "Actualmente usando el proveedor seleccionado manualmente: {{provider}}",
-        "currentProviderUnavailable": "El proveedor seleccionado no está disponible actualmente: {{provider}}"
+        "currentProviderUnavailable": "El proveedor seleccionado no está disponible actualmente: {{provider}}",
+        "modeLabel": "Modo de selección",
+        "modeAuto": "Auto",
+        "modeManual": "Manual",
+        "autoSummary": "Sigue el CLI del chat actual · actualmente {{provider}}",
+        "autoUnavailable": "No hay CLI disponible. Cambia a Manual para elegir uno."
       },
       "prompt": {
         "label": "Additional Prompt",
@@ -1063,7 +1077,13 @@
   "markdown": {
     "copyCode": "Copiar código",
     "copyMessage": "Copiar mensaje",
-    "copySuccess": "¡Copiado!"
+    "copySuccess": "¡Copiado!",
+    "quoteMessage": "Citar mensaje",
+    "quoteSuccess": "¡Citado!"
+  },
+  "contextMenu": {
+    "copy": "Copiar",
+    "quote": "Citar"
   },
   "usage": {
     "checkingLabel": "Comprobando tokentracker-cli…",
@@ -1316,6 +1336,25 @@
     "stopped": "Detenido",
     "progress": "{{completed}} de {{total}} tareas completadas"
   },
+  "subagent": {
+    "process": {
+      "title": "Proceso del agente",
+      "prompt": "Indicación",
+      "thought": "Razonamiento",
+      "filesRead_one": "Leer {{count}} archivo",
+      "filesRead_other": "Leer {{count}} archivos",
+      "otherTools": "Otras herramientas",
+      "result": "Resultado",
+      "showFullOutput": "Ver salida completa",
+      "loading": "Cargando proceso del agente…",
+      "unavailable": "El registro del proceso no está disponible hasta que la sesión tenga un id.",
+      "reportGenerated": "Informe de análisis estructurado generado",
+      "unitMs": "ms",
+      "unitS": "s",
+      "unitTools": "herramientas",
+      "unitTokens": "tokens"
+    }
+  },
   "statusPanel": {
     "todoTab": "Plan",
     "tasksTab": "Tareas",
@@ -1490,6 +1529,9 @@
     "searchPlaceholder": "Buscar modelos",
     "noModelsFound": "No se encontraron modelos",
     "hiddenModelCount": "+ {{count}} modelos más. Escribe para buscar.",
+    "pinned": "Fijados",
+    "pin": "Fijar",
+    "unpin": "Quitar fijado",
     "claude": {
       "sonnet46": {
         "label": "Sonnet 4.6",
@@ -1618,9 +1660,6 @@
     },
     "pi": {
       "label": "PI CLI"
-    },
-    "pi": {
-      "label": "PI CLI"
     }
   },
   "promptEnhancer": {
@@ -1635,7 +1674,18 @@
     "keepOriginal": "Keep Original",
     "enhanceFailed": "Failed to enhance prompt",
     "emptyPrompt": "Please enter a prompt first",
-    "copyEnhanced": "Copy Enhanced"
+    "copyEnhanced": "Copy Enhanced",
+    "modeLabel": "Modo",
+    "modeAuto": "Auto",
+    "modeManual": "Manual",
+    "modeUnavailable": "No disponible",
+    "providerLabel": "CLI",
+    "providerUnresolved": "CLI no resuelto",
+    "modelLabel": "Modelo",
+    "modelUnresolved": "Modelo predeterminado",
+    "openSettings": "Configurar",
+    "openSettingsTooltip": "Abrir configuración del mejorador de prompts",
+    "resolvingUsage": "Resolviendo configuración…"
   },
   "fileContext": {
     "placeholder": "Contexto de archivo",

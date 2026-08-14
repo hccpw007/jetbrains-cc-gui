@@ -21,6 +21,14 @@ export function extractResultText(result?: ToolResultBlock | null): string | und
   return undefined;
 }
 
+// Claude Code's async-launch ack is a fixed, hard-coded tool_result text. It is
+// the only signal we can rely on across versions, because recent versions no longer
+// guarantees a task_notification SDK event for background agents — the agent's
+// terminal report is delivered solely as a main-session XML (see the ai-bridge
+// interception in runtime-lifecycle.js). Matching this text is what keeps the
+// card from flipping to "completed" the instant the ack lands.
+const ASYNC_LAUNCH_TEXT = /Async agent launched/i;
+
 /**
  * Whether an Agent/Task tool input launches a background (async) subagent.
  *
@@ -33,12 +41,56 @@ export function extractResultText(result?: ToolResultBlock | null): string | und
  * Strict === true avoids truthy strings (e.g. "false") flipping the flag. The
  * camelCase `runInBackground` form is also checked as a guard against future
  * normalization changes. Shared by all three call sites so they cannot drift.
+ *
+ * Beyond the input flag, recent Claude Code also returns an `async_launched`
+ * / `remote_launched` / `teammate_spawned` tool-use status and stamps the
+ * launch ack with a fixed "Async agent launched" text. Both are accepted as
+ * fallbacks so an agent whose input lacks `run_in_background` (e.g. spawned
+ * via a different async path) is still recognized and does not get marked
+ * completed on the launch ack alone.
  */
-export function isAsyncAgentInput(input: unknown, normalizedToolName?: string): boolean {
+export function isAsyncAgentInput(
+  input: unknown,
+  normalizedToolName?: string,
+  result?: ToolResultBlock | null,
+  toolUseStatus?: unknown,
+): boolean {
   if (normalizedToolName?.split('.').at(-1) === 'spawn_agent') return true;
-  if (!input || typeof input !== 'object') return false;
+  if (!input || typeof input !== 'object') {
+    // Even a stripped input still betrays an async launch via its ack text or
+    // tool-use status, so do not fall through to "sync" just because input is
+    // missing.
+    return isAsyncLaunchStatus(toolUseStatus) || isAsyncLaunchText(result);
+  }
   const record = input as Record<string, unknown>;
-  return record.run_in_background === true || record.runInBackground === true;
+  if (record.run_in_background === true || record.runInBackground === true) return true;
+  return isAsyncLaunchStatus(toolUseStatus) || isAsyncLaunchText(result);
+}
+
+function isAsyncLaunchText(result?: ToolResultBlock | null): boolean {
+  const text = extractResultText(result);
+  return !!text && ASYNC_LAUNCH_TEXT.test(text);
+}
+
+const ASYNC_LAUNCH_STATUSES = new Set(['async_launched', 'remote_launched', 'teammate_spawned']);
+
+function isAsyncLaunchStatus(status: unknown): boolean {
+  return typeof status === 'string' && ASYNC_LAUNCH_STATUSES.has(status);
+}
+
+/**
+ * Read the `status` field of a tool_result's toolUseResult metadata, returning
+ * undefined for any shape that does not carry one. Centralized so the three
+ * isAsyncAgentInput call sites extract the same field without drifting.
+ */
+export function readToolUseStatus(raw: unknown): unknown {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const record = raw as Record<string, unknown>;
+  const toolUseResult = record.toolUseResult;
+  if (!toolUseResult || typeof toolUseResult !== 'object' || Array.isArray(toolUseResult)) {
+    return undefined;
+  }
+  return (toolUseResult as Record<string, unknown>).status;
 }
 
 export interface SpawnAgentMeta {

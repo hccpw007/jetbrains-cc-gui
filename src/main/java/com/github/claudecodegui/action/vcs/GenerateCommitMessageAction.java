@@ -100,7 +100,11 @@ public class GenerateCommitMessageAction extends AnAction implements DumbAware {
         // generation is in progress. The saved draft is restored on error.
         panel.setCommitMessage(ClaudeCodeGuiBundle.message("commit.generating"));
 
-        service.generateCommitMessage(changes, new CommitMessageCallback() {
+        // Snapshot on the UI thread — ChangeListManager data must not be walked
+        // off-thread without a stable copy. Git diff + AI work is offloaded by
+        // GitCommitMessageService (must not block the EDT / freeze the commit dialog).
+        final List<Change> changesSnapshot = new ArrayList<>(changes);
+        service.generateCommitMessage(changesSnapshot, new CommitMessageCallback() {
             @Override
             public void onProgress(String partial) {
                 // Already dispatched on the EDT by CommitAIClient.

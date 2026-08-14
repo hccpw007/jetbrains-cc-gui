@@ -233,11 +233,20 @@
         "providerUnavailable": "Currently unavailable",
         "provider": {
           "claude": "Claude Code",
-          "codex": "Codex"
+          "codex": "Codex",
+          "grok": "Grok CLI",
+          "kimi": "Kimi CLI",
+          "opencode": "OpenCode",
+          "pi": "PI CLI"
         },
         "currentProviderAuto": "Currently using automatic selection: {{provider}}",
         "currentProviderManual": "Currently using manually selected provider: {{provider}}",
-        "currentProviderUnavailable": "The selected provider is currently unavailable: {{provider}}"
+        "currentProviderUnavailable": "The selected provider is currently unavailable: {{provider}}",
+        "modeLabel": "Mode de sélection",
+        "modeAuto": "Auto",
+        "modeManual": "Manuel",
+        "autoSummary": "Suit le CLI du chat actuel · actuellement {{provider}}",
+        "autoUnavailable": "Aucun CLI disponible. Passez en Manuel pour en choisir un."
       },
       "diffExpanded": {
         "label": "Développer les différences par défaut",
@@ -422,7 +431,12 @@
         "providerUnavailable": "Non disponible",
         "currentProviderAuto": "Utilise actuellement la sélection automatique : {{provider}}",
         "currentProviderManual": "Utilise actuellement le fournisseur sélectionné manuellement : {{provider}}",
-        "currentProviderUnavailable": "Le fournisseur sélectionné n'est actuellement pas disponible : {{provider}}"
+        "currentProviderUnavailable": "Le fournisseur sélectionné n'est actuellement pas disponible : {{provider}}",
+        "modeLabel": "Mode de sélection",
+        "modeAuto": "Auto",
+        "modeManual": "Manuel",
+        "autoSummary": "Suit le CLI du chat actuel · actuellement {{provider}}",
+        "autoUnavailable": "Aucun CLI disponible. Passez en Manuel pour en choisir un."
       },
       "prompt": {
         "label": "Additional Prompt",
@@ -1063,7 +1077,13 @@
   "markdown": {
     "copyCode": "Copier le code",
     "copyMessage": "Copier le message",
-    "copySuccess": "Copié !"
+    "copySuccess": "Copié !",
+    "quoteMessage": "Citer le message",
+    "quoteSuccess": "Cité !"
+  },
+  "contextMenu": {
+    "copy": "Copier",
+    "quote": "Citer"
   },
   "usage": {
     "checkingLabel": "Vérification de tokentracker-cli…",
@@ -1316,6 +1336,25 @@
     "stopped": "Arrêté",
     "progress": "{{completed}} sur {{total}} tâches terminées"
   },
+  "subagent": {
+    "process": {
+      "title": "Processus de l'agent",
+      "prompt": "Invite",
+      "thought": "Raisonnement",
+      "filesRead_one": "Lire {{count}} fichier",
+      "filesRead_other": "Lire {{count}} fichiers",
+      "otherTools": "Autres outils",
+      "result": "Résultat",
+      "showFullOutput": "Afficher la sortie complète",
+      "loading": "Chargement du processus de l'agent…",
+      "unavailable": "Le journal du processus n'est pas disponible tant que la session n'a pas d'identifiant.",
+      "reportGenerated": "Rapport d'analyse structuré généré",
+      "unitMs": "ms",
+      "unitS": "s",
+      "unitTools": "outils",
+      "unitTokens": "tokens"
+    }
+  },
   "statusPanel": {
     "todoTab": "Plan",
     "tasksTab": "Tâches",
@@ -1490,6 +1529,9 @@
     "searchPlaceholder": "Rechercher des modèles",
     "noModelsFound": "Aucun modèle trouvé",
     "hiddenModelCount": "+ {{count}} modèles supplémentaires. Tapez pour rechercher.",
+    "pinned": "Épinglés",
+    "pin": "Épingler",
+    "unpin": "Désépingler",
     "claude": {
       "sonnet46": {
         "label": "Sonnet 4.6",
@@ -1626,7 +1668,18 @@
     "keepOriginal": "Keep Original",
     "enhanceFailed": "Failed to enhance prompt",
     "emptyPrompt": "Please enter a prompt first",
-    "copyEnhanced": "Copy Enhanced"
+    "copyEnhanced": "Copy Enhanced",
+    "modeLabel": "Mode",
+    "modeAuto": "Auto",
+    "modeManual": "Manuel",
+    "modeUnavailable": "Indisponible",
+    "providerLabel": "CLI",
+    "providerUnresolved": "CLI non résolu",
+    "modelLabel": "Modèle",
+    "modelUnresolved": "Modèle par défaut",
+    "openSettings": "Configurer",
+    "openSettingsTooltip": "Ouvrir les paramètres d'amélioration de prompt",
+    "resolvingUsage": "Résolution de la configuration…"
   },
   "fileContext": {
     "placeholder": "Contexte de fichier",

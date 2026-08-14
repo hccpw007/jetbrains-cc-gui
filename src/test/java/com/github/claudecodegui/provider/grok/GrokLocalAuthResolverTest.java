@@ -33,7 +33,7 @@ public class GrokLocalAuthResolverTest {
                 + "default = \"grok\"\n"
                 + "\n"
                 + "[model.grok]\n"
-                + "model = \"grok-4.5\"\n"
+                + "model = \"grok-4.6\"\n"
                 + "base_url = \"https://fufei.mossx.ai/v1\"\n"
                 + "api_key = \"sk-test-from-config\"\n";
         GrokLocalAuthResolver.ConfigCredentials creds =

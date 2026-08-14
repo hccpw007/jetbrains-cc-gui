@@ -97,14 +97,14 @@ test('extractUsedTokens prefers total_tokens then sums parts', () => {
 
 test('getContextUsagePersistent reads runtime.lastUsedTokens after usage remember', async () => {
   resetRegistry();
-  const rt = createTestRuntime('timeout-rt', { model: 'grok-4.5', permissionMode: 'default' });
+  const rt = createTestRuntime('timeout-rt', { model: 'grok-4.6', permissionMode: 'default' });
   rt.lastUsedTokens = 12_345;
   forceSetActiveTurn(rt);
 
   const payload = await getContextUsagePersistent({ maxTokens: 500_000 });
   assert.equal(payload.totalTokens, 12_345);
   assert.equal(payload.maxTokens, 500_000);
-  assert.equal(payload.model, 'grok-4.5');
+  assert.equal(payload.model, 'grok-4.6');
   assert.equal(payload.source, 'grok-synthesized');
 });
 

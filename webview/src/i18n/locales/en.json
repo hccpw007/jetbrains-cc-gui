@@ -404,11 +404,20 @@
         "providerUnavailable": "Currently unavailable",
         "provider": {
           "claude": "Claude Code",
-          "codex": "Codex"
+          "codex": "Codex",
+          "grok": "Grok CLI",
+          "kimi": "Kimi CLI",
+          "opencode": "OpenCode",
+          "pi": "PI CLI"
         },
         "currentProviderAuto": "Currently using automatic selection: {{provider}}",
         "currentProviderManual": "Currently using manually selected provider: {{provider}}",
-        "currentProviderUnavailable": "The selected provider is currently unavailable: {{provider}}"
+        "currentProviderUnavailable": "The selected provider is currently unavailable: {{provider}}",
+        "modeLabel": "Selection mode",
+        "modeAuto": "Auto",
+        "modeManual": "Manual",
+        "autoSummary": "Follows the current chat CLI · currently {{provider}}",
+        "autoUnavailable": "No CLI is available right now. Switch to Manual to pick one."
       },
       "diffExpanded": {
         "label": "Expand diffs by default",
@@ -688,7 +697,12 @@
         "providerUnavailable": "Unavailable",
         "currentProviderAuto": "Currently using auto selection: {{provider}}",
         "currentProviderManual": "Currently using the manually selected provider: {{provider}}",
-        "currentProviderUnavailable": "The selected provider is currently unavailable: {{provider}}"
+        "currentProviderUnavailable": "The selected provider is currently unavailable: {{provider}}",
+        "modeLabel": "Selection mode",
+        "modeAuto": "Auto",
+        "modeManual": "Manual",
+        "autoSummary": "Follows the current chat CLI · currently {{provider}}",
+        "autoUnavailable": "No CLI is available right now. Switch to Manual to pick one."
       },
       "prompt": {
         "label": "Additional Prompt",
@@ -1405,7 +1419,13 @@
   "markdown": {
     "copyCode": "Copy code",
     "copyMessage": "Copy message",
-    "copySuccess": "Copied!"
+    "copySuccess": "Copied!",
+    "quoteMessage": "Quote message",
+    "quoteSuccess": "Quoted!"
+  },
+  "contextMenu": {
+    "copy": "Copy",
+    "quote": "Quote"
   },
   "usage": {
     "checkingLabel": "Checking for tokentracker-cli…",
@@ -1665,6 +1685,7 @@
   "subagent": {
     "process": {
       "title": "Agent process",
+      "prompt": "Prompt",
       "thought": "Thought",
       "filesRead_one": "Read {{count}} file",
       "filesRead_other": "Read {{count}} files",
@@ -1878,6 +1899,9 @@
     "searchPlaceholder": "Search models",
     "noModelsFound": "No models found",
     "hiddenModelCount": "+ {{count}} more models. Type to search.",
+    "pinned": "Pinned",
+    "pin": "Pin",
+    "unpin": "Unpin",
     "longContext": {
       "label": "1M",
       "shortLabel": "1M context",
@@ -1941,9 +1965,9 @@
       }
     },
     "grok": {
-      "grok45": {
-        "label": "Grok 4.5",
-        "description": "xAI Grok 4.5"
+      "grok46": {
+        "label": "Grok 4.6",
+        "description": "xAI Grok 4.6"
       }
     }
   },
@@ -2031,7 +2055,18 @@
     "keepOriginal": "Keep Original",
     "enhanceFailed": "Failed to enhance prompt",
     "emptyPrompt": "Please enter a prompt first",
-    "copyEnhanced": "Copy Enhanced"
+    "copyEnhanced": "Copy Enhanced",
+    "modeLabel": "Mode",
+    "modeAuto": "Auto",
+    "modeManual": "Manual",
+    "modeUnavailable": "Unavailable",
+    "providerLabel": "CLI",
+    "providerUnresolved": "No CLI resolved",
+    "modelLabel": "Model",
+    "modelUnresolved": "Default model",
+    "openSettings": "Configure",
+    "openSettingsTooltip": "Open prompt enhancer settings",
+    "resolvingUsage": "Resolving runtime config…"
   },
   "fileContext": {
     "placeholder": "File Context",

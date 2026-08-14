@@ -1497,8 +1497,11 @@ public class DaemonBridge {
 
         private boolean awaitResult() {
             try {
-                completion.await();
-                return result;
+                // Bound the wait: if the owner thread dies from an Error (e.g.
+                // OOM) complete() is never called and concurrent start()
+                // callers would block forever.
+                return completion.await(DAEMON_START_TIMEOUT_MS * 2, TimeUnit.MILLISECONDS)
+                        && result;
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 return false;

@@ -46,6 +46,10 @@ public class CommitAIClient {
 
     public static final String PROVIDER_CLAUDE = "claude";
     public static final String PROVIDER_CODEX = "codex";
+    public static final String PROVIDER_GROK = "grok";
+    public static final String PROVIDER_KIMI = "kimi";
+    public static final String PROVIDER_OPENCODE = "opencode";
+    public static final String PROVIDER_PI = "pi";
 
     private static final Logger LOG = Logger.getInstance(CommitAIClient.class);
     private static final Gson GSON = new Gson();
@@ -72,8 +76,8 @@ public class CommitAIClient {
     /**
      * Run the commit-message script for the resolved provider + model.
      *
-     * @param provider {@link #PROVIDER_CLAUDE} or {@link #PROVIDER_CODEX}
-     * @param model    resolved model id (may be null → SDK default)
+     * @param provider claude / codex / grok / kimi / opencode / pi
+     * @param model    resolved model id (may be null → SDK/CLI default)
      */
     public void send(@NotNull String prompt, @NotNull String provider, @Nullable String model,
                      @NotNull CommitMessageCallback callback, @NotNull String emptyErrorMessage) {

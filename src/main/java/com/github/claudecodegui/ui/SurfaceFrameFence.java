@@ -227,7 +227,9 @@ public final class SurfaceFrameFence {
         return new JBCefOSRHandlerFactory() {
             @Override
             public JComponent createComponent(boolean isTransparent) {
-                return delegateFactory.createComponent(isTransparent);
+                JComponent component = delegateFactory.createComponent(isTransparent);
+                OsrImeCaretFix.install(component);
+                return component;
             }
 
             @Override

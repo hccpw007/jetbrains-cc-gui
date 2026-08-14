@@ -161,7 +161,7 @@ public class GrokMessageHandlerTest {
     @Test
     public void acpCamelCaseUsageUpdatesContextRing() {
         SessionState state = new SessionState();
-        state.setModel("grok-4.5");
+        state.setModel("grok-4.6");
         state.addMessage(new Message(Message.Type.USER, "q"));
 
         RecordingCallback callback = new RecordingCallback();
@@ -177,7 +177,7 @@ public class GrokMessageHandlerTest {
     @Test
     public void snakeCaseUsageUpdatesContextRingAndStoresCanonical() {
         SessionState state = new SessionState();
-        state.setModel("grok-4.5");
+        state.setModel("grok-4.6");
         state.addMessage(new Message(Message.Type.USER, "q"));
 
         RecordingCallback callback = new RecordingCallback();
@@ -199,7 +199,7 @@ public class GrokMessageHandlerTest {
     @Test
     public void finalMessageWithoutUsageDoesNotWipePriorUsage() {
         SessionState state = new SessionState();
-        state.setModel("grok-4.5");
+        state.setModel("grok-4.6");
         state.addMessage(new Message(Message.Type.USER, "q"));
 
         RecordingCallback callback = new RecordingCallback();

@@ -1,6 +1,15 @@
 /**
- * Discover Grok models from ~/.grok/models_cache.json and ~/.grok/config.toml.
- * Grok CLI auto-fetches API models to models_cache.json and allows custom profiles in config.toml.
+ * Discover Grok models from ~/.grok/config.toml profiles and models_cache.json.
+ *
+ * Grok CLI `-m` must be a **config profile name** (`[model."name"]`) when using
+ * custom base_url/api_key. Dumping the entire models_cache (often a third-party
+ * OpenAI-compatible gateway catalog with third-party model ids) into the picker
+ * is wrong — those ids bypass profile routing.
+ *
+ * Priority:
+ *  1. Profiles from config.toml (always preferred when present)
+ *  2. models_cache.json (official / bare API catalogs, only when no profiles)
+ *  3. Static last-resort fallbacks
  */
 
 import { existsSync, readFileSync } from 'node:fs';
@@ -41,14 +50,43 @@ export function parseModelsCacheJson(jsonText) {
   return { models, seen };
 }
 
+/**
+ * Extract the body of a TOML section, line-based so a top-level `[` inside a
+ * section body (e.g. an unindented multi-line array) cannot truncate it early.
+ * Returns null when the section is absent.
+ */
+function extractTomlSection(src, sectionName) {
+  const lines = String(src).split('\n');
+  let inSection = false;
+  let found = false;
+  const body = [];
+  for (const line of lines) {
+    const header = line.match(/^\s*\[([^\]]+)\]/);
+    if (header) {
+      if (inSection) break;
+      inSection = header[1].trim() === sectionName;
+      found = found || inSection;
+      continue;
+    }
+    if (inSection) body.push(line);
+  }
+  return found ? body.join('\n') : null;
+}
+
 export function parseGrokProfilesFromToml(tomlText, seenSet = new Set()) {
   const models = [];
   let defaultModel = null;
   const src = String(tomlText || '');
 
-  // Grok keeps `default` inside the `[models]` section (not at TOML top level),
-  // so this intentionally matches anywhere in the file, first occurrence wins.
-  const defaultMatch = src.match(/^\s*default\s*=\s*"([^"]+)"/m);
+  // Grok keeps `default` inside the `[models]` section. Restrict the match to
+  // that section (falling back to the top-level region before the first
+  // header) so a `default = "..."` key inside a [model.*] profile or an
+  // unrelated section is not misread as the global default.
+  const modelsBody = extractTomlSection(src, 'models');
+  const defaultScope = modelsBody != null
+    ? modelsBody
+    : src.split(/^\s*\[/m)[0];
+  const defaultMatch = defaultScope.match(/^\s*default\s*=\s*"([^"]+)"/m);
   if (defaultMatch) {
     defaultModel = defaultMatch[1].trim();
   }
@@ -61,14 +99,68 @@ export function parseGrokProfilesFromToml(tomlText, seenSet = new Set()) {
     seenSet.add(id);
     const body = match[3] || '';
     const nestedModel = body.match(/^\s*model\s*=\s*"([^"]+)"/m);
+    const nameMatch = body.match(/^\s*name\s*=\s*"([^"]+)"/m);
+    const nestedId = nestedModel ? nestedModel[1].trim() : '';
+    const displayName = nameMatch ? nameMatch[1].trim() : '';
     models.push({
       id,
-      label: id,
-      description: nestedModel ? nestedModel[1].trim() : id,
+      // Prefer explicit display name, then nested upstream model id, then profile id.
+      label: displayName || nestedId || id,
+      description: nestedId || id,
     });
   }
 
   return { models, defaultModel };
+}
+
+/** Static last-resort list when neither profiles nor cache exist. */
+export const GROK_STATIC_FALLBACK_MODELS = [
+  { id: 'grok-4.6', label: 'Grok 4.6', description: "SpaceXAI's new frontier model" },
+  { id: 'grok-3', label: 'Grok 3', description: 'xAI Grok 3' },
+  { id: 'grok-2', label: 'Grok 2', description: 'xAI Grok 2' },
+  { id: 'grok-beta', label: 'Grok Beta', description: 'xAI Grok Beta' },
+];
+
+/**
+ * Pure merge used by listModels (and tests): prefer profiles over the raw
+ * API catalog dump.
+ */
+export function resolveGrokPickerModels({ profileModels = [], cacheModels = [], defaultModel = null } = {}) {
+  const profiles = Array.isArray(profileModels) ? profileModels : [];
+  const cache = Array.isArray(cacheModels) ? cacheModels : [];
+
+  if (profiles.length > 0) {
+    // Enrich profile labels from cache when the same id exists and the profile
+    // still shows a bare id as its label.
+    const cacheById = new Map(cache.map((m) => [m.id, m]));
+    const models = profiles.map((profile) => {
+      const fromCache = cacheById.get(profile.id);
+      if (!fromCache) return profile;
+      const labelIsBareId = !profile.label || profile.label === profile.id;
+      if (!labelIsBareId) return profile;
+      return {
+        ...profile,
+        label: fromCache.label || profile.label,
+        description: profile.description || fromCache.description,
+      };
+    });
+    return {
+      models,
+      defaultModel: defaultModel || profiles[0].id,
+    };
+  }
+
+  if (cache.length > 0) {
+    return {
+      models: cache,
+      defaultModel: defaultModel || cache[0].id,
+    };
+  }
+
+  return {
+    models: [...GROK_STATIC_FALLBACK_MODELS],
+    defaultModel: defaultModel || 'grok-4.6',
+  };
 }
 
 export function listModels() {
@@ -76,47 +168,41 @@ export function listModels() {
   const cachePath = join(grokDir, 'models_cache.json');
   const configPath = join(grokDir, 'config.toml');
 
-  let allModels = [];
-  const seen = new Set();
-  let defaultModel = 'grok-4.5';
-
-  if (existsSync(cachePath)) {
-    try {
-      const raw = readFileSync(cachePath, 'utf8');
-      const { models: cacheModels, seen: cacheSeen } = parseModelsCacheJson(raw);
-      allModels.push(...cacheModels);
-      cacheSeen.forEach((id) => seen.add(id));
-    } catch (e) {
-      console.error('[Grok Models] Failed to read models_cache.json:', e?.message || e);
-    }
-  }
+  let cacheModels = [];
+  let profileModels = [];
+  let defaultModel = null;
 
   if (existsSync(configPath)) {
     try {
       const raw = readFileSync(configPath, 'utf8');
-      const { models: profileModels, defaultModel: def } = parseGrokProfilesFromToml(raw, seen);
-      allModels.push(...profileModels);
-      if (def) defaultModel = def;
+      const parsed = parseGrokProfilesFromToml(raw, new Set());
+      profileModels = parsed.models;
+      if (parsed.defaultModel) defaultModel = parsed.defaultModel;
     } catch (e) {
       console.error('[Grok Models] Failed to read config.toml:', e?.message || e);
     }
   }
 
-  if (allModels.length === 0) {
-    // Last-resort static list, used only when neither the CLI's models cache
-    // nor config.toml profiles exist (e.g. grok CLI never ran).
-    allModels = [
-      { id: 'grok-4.5', label: 'Grok 4.5', description: "SpaceXAI's new frontier model" },
-      { id: 'grok-3', label: 'Grok 3', description: 'xAI Grok 3' },
-      { id: 'grok-2', label: 'Grok 2', description: 'xAI Grok 2' },
-      { id: 'grok-beta', label: 'Grok Beta', description: 'xAI Grok Beta' },
-    ];
+  if (existsSync(cachePath)) {
+    try {
+      const raw = readFileSync(cachePath, 'utf8');
+      const { models } = parseModelsCacheJson(raw);
+      cacheModels = models;
+    } catch (e) {
+      console.error('[Grok Models] Failed to read models_cache.json:', e?.message || e);
+    }
   }
+
+  const resolved = resolveGrokPickerModels({
+    profileModels,
+    cacheModels,
+    defaultModel,
+  });
 
   const payload = {
     success: true,
-    models: allModels,
-    defaultModel,
+    models: resolved.models,
+    defaultModel: resolved.defaultModel,
   };
 
   console.log(JSON.stringify(payload));

@@ -76,9 +76,20 @@ public class ClaudeSession {
         }
 
         public Type type;
-        public String content;
+        // The streaming handler thread reassigns these on every assistant update
+        // (e.g. `raw = mergedRaw`, `content = builder.toString()`) while
+        // StreamMessageCoalescer serializes the same Message off-EDT — enqueue only
+        // shallow-copies the list, so elements are shared across threads. Without
+        // volatile the serializer could read a stale reference and publish a snapshot
+        // predating a just-reassigned tool_use block, which the frontend's structural
+        // merge (it takes blocks from the new snapshot only) would then freeze as
+        // missing.
+        // This covers the reassignment race, the dominant mutation pattern. Note:
+        // a few call sites still mutate the JsonObject in place (turnUsage / uuid /
+        // usage stamps in ClaudeMessageHandler); those are a separate concern.
+        public volatile String content;
         public long timestamp;
-        public JsonObject raw; // Raw message data from SDK
+        public volatile JsonObject raw; // Raw message data from SDK
 
         public Message(Type type, String content) {
             this.type = type;

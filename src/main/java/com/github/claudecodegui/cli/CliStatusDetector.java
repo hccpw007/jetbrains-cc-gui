@@ -1,6 +1,7 @@
 package com.github.claudecodegui.cli;
 
 import com.github.claudecodegui.util.PlatformUtils;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
 
 import java.io.BufferedReader;
@@ -15,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -45,8 +47,49 @@ public final class CliStatusDetector {
     }
 
     private static volatile CachedDetection detectAllCache;
+    private static final AtomicBoolean detectAllRefreshRunning = new AtomicBoolean(false);
 
     private CliStatusDetector() {
+    }
+
+    /**
+     * Non-blocking variant of {@link #detectAll()}: returns the last cached
+     * result immediately — even when expired — and refreshes the cache on a
+     * pooled thread. Probing spawns child processes with multi-second
+     * timeouts, so re-probing on the calling (possibly UI) thread after TTL
+     * expiry can freeze the UI; staleness for one TTL window is acceptable.
+     *
+     * <p>Falls back to a synchronous {@link #detectAll()} when nothing has
+     * ever been cached (first probe of the session).
+     */
+    public static Map<String, CliToolStatus> detectAllStaleWhileRevalidate() {
+        long now = System.currentTimeMillis();
+        CachedDetection cached = detectAllCache;
+        if (cached == null) {
+            return detectAll();
+        }
+        if (now - cached.timestampMillis >= CACHE_TTL_MILLIS) {
+            refreshDetectAllAsync();
+        }
+        return cached.result;
+    }
+
+    private static void refreshDetectAllAsync() {
+        if (!detectAllRefreshRunning.compareAndSet(false, true)) {
+            return;
+        }
+        if (ApplicationManager.getApplication() == null) {
+            // Headless unit tests: no pooled threads, keep stale result.
+            detectAllRefreshRunning.set(false);
+            return;
+        }
+        ApplicationManager.getApplication().executeOnPooledThread(() -> {
+            try {
+                detectAll();
+            } finally {
+                detectAllRefreshRunning.set(false);
+            }
+        });
     }
 
     /**

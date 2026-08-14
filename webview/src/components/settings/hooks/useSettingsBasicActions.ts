@@ -3,7 +3,10 @@ import { useState, useEffect, useCallback } from 'react';
 export type { UiFontConfig, CodeFontConfig } from '../../../types/uiFontConfig';
 import type { UiFontConfig, CodeFontConfig } from '../../../types/uiFontConfig';
 import type { CommitAiConfig, CommitAiProvider } from '../../../types/aiFeatureConfig';
-import { DEFAULT_COMMIT_AI_CONFIG } from '../../../types/aiFeatureConfig';
+import {
+  DEFAULT_COMMIT_AI_CONFIG,
+  pickAutoAiFeatureProvider,
+} from '../../../types/aiFeatureConfig';
 import type { PromptEnhancerConfig, PromptEnhancerProvider } from '../../../types/promptEnhancer';
 import { DEFAULT_PROMPT_ENHANCER_CONFIG } from '../../../types/promptEnhancer';
 import {
@@ -37,6 +40,8 @@ export interface UseSettingsBasicActionsProps {
   onAutoOpenFileEnabledChangeProp?: (enabled: boolean) => void;
   permissionDialogTimeoutSecondsProp?: number;
   onPermissionDialogTimeoutChangeProp?: (seconds: number) => void;
+  /** Current chat CLI — prompt enhancer auto mode follows this when available. */
+  currentProvider?: string;
 }
 
 export interface UseSettingsBasicActionsReturn {
@@ -193,6 +198,7 @@ export function useSettingsBasicActions({
   onAutoOpenFileEnabledChangeProp,
   permissionDialogTimeoutSecondsProp,
   onPermissionDialogTimeoutChangeProp,
+  currentProvider,
 }: UseSettingsBasicActionsProps): UseSettingsBasicActionsReturn {
   // Node.js path
   const [nodePath, setNodePath] = useState('');
@@ -589,22 +595,23 @@ export function useSettingsBasicActions({
   }, [commitAiConfig]);
 
   const handleCommitAiResetToDefault = useCallback(() => {
+    // Auto mode follows the current chat provider when that CLI is available.
+    const autoProvider = pickAutoAiFeatureProvider(
+      commitAiConfig.availability,
+      currentProvider,
+    );
     const nextConfig: CommitAiConfig = {
       ...commitAiConfig,
       provider: null,
-      effectiveProvider: commitAiConfig.availability.codex
-        ? 'codex'
-        : (commitAiConfig.availability.claude ? 'claude' : null),
-      resolutionSource: commitAiConfig.availability.codex || commitAiConfig.availability.claude
-        ? 'auto'
-        : 'unavailable',
+      effectiveProvider: autoProvider,
+      resolutionSource: autoProvider ? 'auto' : 'unavailable',
     };
     setCommitAiConfig(nextConfig);
     sendToJava(`set_commit_ai_config:${JSON.stringify({
       provider: null,
       models: nextConfig.models,
     })}`);
-  }, [commitAiConfig]);
+  }, [commitAiConfig, currentProvider]);
 
   const handlePromptEnhancerProviderChange = useCallback((provider: PromptEnhancerProvider) => {
     const providerAvailable = promptEnhancerConfig.availability[provider];
@@ -638,22 +645,89 @@ export function useSettingsBasicActions({
   }, [promptEnhancerConfig]);
 
   const handlePromptEnhancerResetToDefault = useCallback(() => {
+    // Auto mode follows the current chat provider when that CLI is available.
+    const autoProvider = pickAutoAiFeatureProvider(
+      promptEnhancerConfig.availability,
+      currentProvider,
+    );
     const nextConfig: PromptEnhancerConfig = {
       ...promptEnhancerConfig,
       provider: null,
-      effectiveProvider: promptEnhancerConfig.availability.codex
-        ? 'codex'
-        : (promptEnhancerConfig.availability.claude ? 'claude' : null),
-      resolutionSource: promptEnhancerConfig.availability.codex || promptEnhancerConfig.availability.claude
-        ? 'auto'
-        : 'unavailable',
+      effectiveProvider: autoProvider,
+      resolutionSource: autoProvider ? 'auto' : 'unavailable',
     };
     setPromptEnhancerConfig(nextConfig);
     sendToJava(`set_prompt_enhancer_config:${JSON.stringify({
       provider: null,
       models: nextConfig.models,
     })}`);
-  }, [promptEnhancerConfig]);
+  }, [promptEnhancerConfig, currentProvider]);
+
+  // Keep auto-mode effectiveProvider in sync when the chat CLI changes.
+  useEffect(() => {
+    if (promptEnhancerConfig.provider !== null) {
+      return;
+    }
+    const nextEffective = pickAutoAiFeatureProvider(
+      promptEnhancerConfig.availability,
+      currentProvider,
+    );
+    if (nextEffective === promptEnhancerConfig.effectiveProvider) {
+      return;
+    }
+    setPromptEnhancerConfig((prev) => {
+      if (prev.provider !== null) {
+        return prev;
+      }
+      const resolved = pickAutoAiFeatureProvider(prev.availability, currentProvider);
+      if (resolved === prev.effectiveProvider) {
+        return prev;
+      }
+      return {
+        ...prev,
+        effectiveProvider: resolved,
+        resolutionSource: resolved ? 'auto' : 'unavailable',
+      };
+    });
+  }, [
+    currentProvider,
+    promptEnhancerConfig.provider,
+    promptEnhancerConfig.availability,
+    promptEnhancerConfig.effectiveProvider,
+  ]);
+
+  // Keep commit AI auto-mode effectiveProvider in sync when the chat CLI changes.
+  useEffect(() => {
+    if (commitAiConfig.provider !== null) {
+      return;
+    }
+    const nextEffective = pickAutoAiFeatureProvider(
+      commitAiConfig.availability,
+      currentProvider,
+    );
+    if (nextEffective === commitAiConfig.effectiveProvider) {
+      return;
+    }
+    setCommitAiConfig((prev) => {
+      if (prev.provider !== null) {
+        return prev;
+      }
+      const resolved = pickAutoAiFeatureProvider(prev.availability, currentProvider);
+      if (resolved === prev.effectiveProvider) {
+        return prev;
+      }
+      return {
+        ...prev,
+        effectiveProvider: resolved,
+        resolutionSource: resolved ? 'auto' : 'unavailable',
+      };
+    });
+  }, [
+    currentProvider,
+    commitAiConfig.provider,
+    commitAiConfig.availability,
+    commitAiConfig.effectiveProvider,
+  ]);
 
   // Commit AI prompt save handler
   const handleSaveCommitPrompt = useCallback(() => {

@@ -280,6 +280,11 @@ interface Window {
   insertCodeSnippetAtCursor?: (selectionInfo: string) => void;
 
   /**
+   * Insert an inline quote chip. Payload: JSON { text } - registered by ChatInputBox
+   */
+  addQuotedSnippet?: (payload: string) => void;
+
+  /**
    * Focus the chat input box - registered by ChatInputBox
    */
   focusChatInput?: () => void;

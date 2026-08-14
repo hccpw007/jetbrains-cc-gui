@@ -1,6 +1,7 @@
 import { AsyncStream } from '../../utils/async-stream.js';
 import { loadClaudeSdk } from '../../utils/sdk-loader.js';
 import { createPreToolUseHook, normalizePermissionMode } from './permission-mode.js';
+import { parseTaskNotificationXml, buildTaskNotificationEvent, extractTaskNotificationXml } from './task-notification-parser.js';
 import {
   beginRuntimeTurn,
   cleanupStaleAnonymousRuntimes as cleanupAnonymousFromRegistry,
@@ -15,6 +16,52 @@ import {
 } from './runtime-registry.js';
 
 let cachedQueryFn = null;
+
+/**
+ * Emit a process-level daemon event that bypasses daemon.js's activeRequestId
+ * interception.
+ *
+ * _originalStdoutWrite is required because daemon.js intercepts process.stdout
+ * .write and wraps output with the active request's id; a plain console.log
+ * here would tag the event with whatever request is currently active (possibly
+ * a different session) and misdeliver it. Writing directly to the original
+ * stdout keeps the event process-level, which Java's DaemonBridge.handleDaemon
+ * Event then routes to registered listeners.
+ *
+ * Hoisted to module scope (out of the perpetual reader closure) so executeTurn
+ * can emit task events on the in-turn path too — see emitTaskEvent.
+ */
+function emitDaemonEvent(event, sessionId, payload = {}) {
+  try {
+    const originalWrite = process.stdout._originalStdoutWrite;
+    if (!originalWrite) {
+      console.error(`[PERPETUAL_READER] _originalStdoutWrite not available (daemon.js not initialized?), cannot emit ${event} event`);
+      return;
+    }
+    const eventPayload = { type: 'daemon', event, sessionId, ...payload };
+    originalWrite.call(process.stdout, JSON.stringify(eventPayload) + '\n', 'utf8');
+  } catch (err) {
+    console.error(`[PERPETUAL_READER] Failed to emit ${event} event:`, err);
+  }
+}
+
+function emitInterTurnEvent(sessionId) {
+  emitDaemonEvent('session_updated', sessionId);
+}
+
+/**
+ * Forward a task lifecycle event to Java as a daemon event. The message is
+ * either a real SDK task_* system event (settled after the turn's result, so
+ * it arrives inter-turn) or a task_notification synthesized from a
+ * <task-notification> XML carried by a main-session user message (recent
+ * Claude Code delivers the background agent's terminal report that way
+ * instead of emitting an SDK event). Both the perpetual reader (inter-turn)
+ * and executeTurn (in-turn) call this so every delivery path converges on
+ * window.onTaskEvent, which dedups by tool_use_id + observable fields.
+ */
+export function emitTaskEvent(sessionId, taskMsg) {
+  emitDaemonEvent('task_event', sessionId, { taskEvent: taskMsg });
+}
 
 /**
  * TurnSink: A simple queue/channel for passing messages from the perpetual reader to executeTurn.
@@ -249,58 +296,9 @@ async function createRuntime(requestContext, callbacks) {
  * Exported for testing; returns the reader loop promise.
  */
 export function startPerpetualReader(runtime, callbacks) {
-  /**
-   * Emit an inter-turn daemon event using daemon.js's writeRawLine mechanism.
-   *
-   * IMPORTANT: Must bypass activeRequestId interception to avoid misrouting.
-   *
-   * Why writeRawLine is required:
-   * - daemon.js intercepts process.stdout.write and wraps output with activeRequestId
-   * - If we used console.log() here, the event would be tagged with whatever request
-   *   is currently active (possibly from a different session)
-   * - This would cause the event to be delivered to the wrong session
-   * - writeRawLine (_originalStdoutWrite) bypasses the interception layer and outputs
-   *   directly to stdout, ensuring the event is process-level and not request-scoped
-   *
-   * The event format {type: 'daemon', event, sessionId, ...payload} is recognized
-   * by Java's DaemonBridge.handleDaemonEvent() which routes it to registered listeners.
-   */
-  const emitDaemonEvent = (event, sessionId, payload = {}) => {
-    try {
-      // daemon.js stores the original stdout.write as _originalStdoutWrite.
-      // We must use _originalStdoutWrite to bypass activeRequestId wrapping.
-      const originalWrite = process.stdout._originalStdoutWrite;
-      if (!originalWrite) {
-        console.error(`[PERPETUAL_READER] _originalStdoutWrite not available (daemon.js not initialized?), cannot emit ${event} event`);
-        return;
-      }
-      const eventPayload = { type: 'daemon', event, sessionId, ...payload };
-      originalWrite.call(process.stdout, JSON.stringify(eventPayload) + '\n', 'utf8');
-    } catch (err) {
-      console.error(`[PERPETUAL_READER] Failed to emit ${event} event:`, err);
-    }
-  };
-
-  const emitInterTurnEvent = (sessionId) => emitDaemonEvent('session_updated', sessionId);
-
-  // Forward a task_* SDK system event (async subagent lifecycle) to Java as a
-  // daemon event. This is the inter-turn delivery path for a task_notification
-  // that settles AFTER the turn's result: executeTurn breaks on the result and
-  // clears turnSink (in its finally) before the perpetual reader's next
-  // query.next() resolves, so the late event arrives with turnSink already
-  // null and the in-turn [MESSAGE] stream cannot carry it. Without this
-  // forward, that late event is silently dropped and the frontend subagent
-  // list stays stuck on "running" until a manual reload.
-  //
-  // A task_notification that settles BEFORE the turn's result is still pushed
-  // to turnSink while it is live, so executeTurn processes it via the in-turn
-  // [MESSAGE] stream (ClaudeMessageHandler.handleSystemMessage ->
-  // notifyTaskEvent). Both paths converge on window.onTaskEvent, which dedups
-  // by tool_use_id + observable fields - see DaemonBridge.handleDaemonEvent
-  // for the defense-in-depth rationale. Do NOT delete either path without
-  // confirming at runtime which one a given task_notification takes.
-  const emitTaskEvent = (sessionId, taskMsg) =>
-    emitDaemonEvent('task_event', sessionId, { taskEvent: taskMsg });
+  // emitDaemonEvent / emitInterTurnEvent / emitTaskEvent are defined at module
+  // scope above so executeTurn can share the in-turn task-event emission path.
+  // See those definitions for the bypass-activeRequestId rationale.
 
   // Start the perpetual reader loop; return the promise so callers (and tests)
   // can await its completion.
@@ -381,6 +379,32 @@ export function startPerpetualReader(runtime, callbacks) {
               emitTaskEvent(runtime.sessionId, msg);
             } else {
               console.log('[PERPETUAL_READER] Inter-turn task_* event for anonymous runtime, consuming silently (subtype=' + msg.subtype + ')');
+            }
+          }
+          // Recent Claude Code terminates a background Agent by injecting a
+          // <task-notification> XML into the main session, not as an SDK
+          // task_notification event. The XML arrives as either a plain user
+          // message (content) or a queued_command attachment (prompt); both are
+          // recognized by extractTaskNotificationXml. It carries the agent's
+          // full <result> report; inter-turn it is otherwise silently consumed
+          // (the frontend only sees it after a reload). Parse the XML and
+          // synthesize the task_notification event the SDK no longer emits, so
+          // window.onTaskEvent can surface the report without waiting for a
+          // reload. (The frontend also recovers these from history on its own —
+          // see collectTaskEventsFromMessages — so this is the live fast-path.)
+          const taskNotificationXml = extractTaskNotificationXml(msg);
+          if (taskNotificationXml !== null) {
+            if (runtime.sessionId) {
+              const parsed = parseTaskNotificationXml(taskNotificationXml);
+              const event = buildTaskNotificationEvent(parsed);
+              if (event) {
+                console.log('[PERPETUAL_READER] Inter-turn task-notification message for sessionId=' + runtime.sessionId + ', toolUseId=' + parsed.toolUseId + ', status=' + event.status);
+                emitTaskEvent(runtime.sessionId, event);
+              } else {
+                console.log('[PERPETUAL_READER] Inter-turn task-notification message could not be parsed (no tool_use_id or non-terminal status), consuming silently');
+              }
+            } else {
+              console.log('[PERPETUAL_READER] Inter-turn task-notification message for anonymous runtime, consuming silently');
             }
           }
           // For other message types during inter-turn, we silently consume

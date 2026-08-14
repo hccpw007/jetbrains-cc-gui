@@ -8,6 +8,7 @@ import {
   isAsyncAgentInput,
   parseAgentToolMeta,
   parseSpawnAgentMeta,
+  readToolUseStatus,
 } from '../../utils/subagentResult';
 import {
   useSubagentHistories,
@@ -84,8 +85,12 @@ const TaskExecutionBlock = memo(function TaskExecutionBlock({ name, input, resul
   // was registered) returns an is_error tool_result and never emits a
   // task_notification, so treat that as an error instead of staying stuck.
   // isAsyncAgentInput centralizes the strict === true check shared with
-  // useSubagents and AgentGroupBlock.
-  const isAsync = input ? isAsyncAgentInput(input, normalizedName) : false;
+  // useSubagents and AgentGroupBlock. The launch ack text and tool-use status
+  // are passed as fallbacks so an agent spawned without run_in_background is
+  // still recognized as async.
+  const isAsync = input
+    ? isAsyncAgentInput(input, normalizedName, result, readToolUseStatus(toolId ? getToolResultRaw(toolId) : null))
+    : false;
   const hasTerminalResult = result !== undefined && result !== null;
   const taskFailed = taskEvent?.status === 'failed' || taskEvent?.status === 'stopped';
   // Async completion has two authoritative sources: the live task_notification,
@@ -227,6 +232,7 @@ const TaskExecutionBlock = memo(function TaskExecutionBlock({ name, input, resul
                 totalTokens={detailTokens}
                 totalToolUseCount={detailToolUseCount}
                 resultText={detailResultText}
+                prompt={typeof prompt === 'string' ? prompt : undefined}
                 history={history}
                 canLoad={Boolean(currentSessionId)}
               />

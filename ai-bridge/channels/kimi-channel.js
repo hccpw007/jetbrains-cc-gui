@@ -21,16 +21,18 @@ export async function handleKimiCommand(command, args, stdinData) {
           cwd,
           model,
           reasoningEffort,
+          attachments,
         } = stdinData;
         await kimiSendMessage(
           message,
           sessionId || '',
           cwd || '',
           model || '',
-          reasoningEffort || ''
+          reasoningEffort || '',
+          attachments || []
         );
       } else {
-        await kimiSendMessage(args[0], args[1], args[2], args[3], args[4]);
+        await kimiSendMessage(args[0], args[1], args[2], args[3], args[4], []);
       }
       break;
     }

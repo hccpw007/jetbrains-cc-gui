@@ -33,6 +33,11 @@ import {
   isNonEmptySessionId,
   safePromptArg,
 } from '../../utils/marker-protocol.js';
+import {
+  buildReadPathPromptWithImages,
+  cleanupMaterializedImagePaths,
+  materializeImageAttachments,
+} from '../../utils/cli-image-input.js';
 
 const THINKING_LEVELS = new Set(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
 
@@ -112,24 +117,40 @@ function buildPiArgs({ message, sessionId, model, reasoningEffort }) {
  * @param {string} cwd
  * @param {string} model
  * @param {string} [reasoningEffort] mapped to PI `--thinking` level
+ * @param {Array} [attachments] image attachments (fileName/mediaType/data)
  */
 export async function sendMessage(
   message,
   sessionId = '',
   cwd = '',
   model = '',
-  reasoningEffort = ''
+  reasoningEffort = '',
+  attachments = []
 ) {
   beginStream();
 
+  // PI headless has no dedicated multimodal flag; inject absolute paths and
+  // ask the agent to Read the images (best-effort, same as non-vision Claude path).
+  let promptText = message || '';
+  let imagePaths = [];
+  try {
+    imagePaths = await materializeImageAttachments(attachments);
+    if (imagePaths.length > 0) {
+      promptText = buildReadPathPromptWithImages(promptText, imagePaths);
+      logDebug('image attachments', imagePaths.length, imagePaths);
+    }
+  } catch (err) {
+    console.error('[PI] failed to materialize image attachments:', err?.message || err);
+  }
+
   const bin = resolvePiCliPath();
-  const args = buildPiArgs({ message, sessionId, model, reasoningEffort });
+  const args = buildPiArgs({ message: promptText, sessionId, model, reasoningEffort });
   if (isNonEmptySessionId(sessionId)) {
     emitSessionId(sessionId.trim());
   }
 
   logDebug('spawn', bin, args.slice(0, -1).join(' '),
-    `promptLen=${String(message || '').length}`);
+    `promptLen=${String(promptText || '').length}`);
 
   const env = { ...process.env };
   const home = process.env.HOME || process.env.USERPROFILE || homedir();
@@ -137,6 +158,7 @@ export async function sendMessage(
 
   const workCwd = cwd && cwd !== 'undefined' && cwd !== 'null' ? cwd : process.cwd();
 
+  try {
   await runCliStreaming({
     bin,
     args,
@@ -197,4 +219,7 @@ export async function sendMessage(
       }
     },
   });
+  } finally {
+    await cleanupMaterializedImagePaths(imagePaths);
+  }
 }

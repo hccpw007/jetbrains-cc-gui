@@ -29,6 +29,11 @@ import {
   isNonEmptySessionId,
   safePromptArg,
 } from '../../utils/marker-protocol.js';
+import {
+  buildKimiPromptWithImages,
+  cleanupMaterializedImagePaths,
+  materializeImageAttachments,
+} from '../../utils/cli-image-input.js';
 
 function logDebug(...args) {
   console.error('[DEBUG][Kimi]', ...args);
@@ -170,25 +175,41 @@ function buildKimiArgs({ message, sessionId, model }) {
  * @param {string} cwd
  * @param {string} model
  * @param {string} [_reasoningEffort] unused (Kimi CLI has no effort flag in headless)
+ * @param {Array} [attachments] image attachments (fileName/mediaType/data)
  */
 export async function sendMessage(
   message,
   sessionId = '',
   cwd = '',
   model = '',
-  _reasoningEffort = ''
+  _reasoningEffort = '',
+  attachments = []
 ) {
   beginStream();
 
+  // Headless Kimi has no multimodal -p payload; inject absolute paths +
+  // ReadMediaFile instructions (same approach as desktop-cc-gui).
+  let promptText = message || '';
+  let imagePaths = [];
+  try {
+    imagePaths = await materializeImageAttachments(attachments);
+    if (imagePaths.length > 0) {
+      promptText = buildKimiPromptWithImages(promptText, imagePaths);
+      logDebug('image attachments', imagePaths.length, imagePaths);
+    }
+  } catch (err) {
+    console.error('[Kimi] failed to materialize image attachments:', err?.message || err);
+  }
+
   const bin = resolveKimiCliPath();
-  const args = buildKimiArgs({ message, sessionId, model });
+  const args = buildKimiArgs({ message: promptText, sessionId, model });
   let resolvedSessionId = isNonEmptySessionId(sessionId) ? sessionId.trim() : null;
   if (resolvedSessionId) {
     emitSessionId(resolvedSessionId);
   }
 
   logDebug('spawn', bin, args.filter((_, i) => args[i - 1] !== '--prompt').join(' '),
-    `promptLen=${String(message || '').length}`);
+    `promptLen=${String(promptText || '').length}`);
 
   const env = { ...process.env };
   const home = process.env.HOME || process.env.USERPROFILE || homedir();
@@ -200,6 +221,7 @@ export async function sendMessage(
   // skip calls already emitted (stable key: id + args, since id may be absent).
   const seenToolCallKeys = new Set();
 
+  try {
   await runCliStreaming({
     bin,
     args,
@@ -243,4 +265,7 @@ export async function sendMessage(
       }
     },
   });
+  } finally {
+    await cleanupMaterializedImagePaths(imagePaths);
+  }
 }

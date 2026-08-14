@@ -22,6 +22,11 @@ import {
   isNonEmptySessionId,
   safePromptArg,
 } from '../../utils/marker-protocol.js';
+import {
+  GROK_IMAGE_ONLY_FALLBACK_TEXT,
+  cleanupMaterializedImagePaths,
+  materializeImageAttachments,
+} from '../../utils/cli-image-input.js';
 
 function logDebug(...args) {
   console.error('[DEBUG][OpenCode]', ...args);
@@ -92,11 +97,15 @@ function extractTextDelta(event) {
 }
 
 function extractErrorMessage(event) {
+  // OpenCode 1.x: { type: 'error', error: { name, data: { message } } }
   return firstNonEmptyStr([
     event?.error?.message,
+    event?.error?.data?.message,
+    typeof event?.error?.data === 'string' ? event.error.data : null,
     typeof event?.error === 'string' ? event.error : null,
     event?.message,
     event?.data?.message,
+    typeof event?.error?.name === 'string' ? event.error.name : null,
   ]);
 }
 
@@ -239,7 +248,18 @@ function resolveModelFlag(model) {
   return trimmed;
 }
 
-function buildOpenCodeArgs({ message, sessionId, model }) {
+/**
+ * Build `opencode run` argv.
+ *
+ * IMPORTANT: prompt must come BEFORE `-f/--file`. OpenCode's yargs defines
+ * `--file` as an array option, so trailing positionals after `-f <path>` are
+ * greedily consumed as extra file paths → `File not found: <prompt>`.
+ * Avoid `run -- <msg>` (broken on some OpenCode versions).
+ *
+ * @param {{ message?: string, sessionId?: string, model?: string, imagePaths?: string[] }} opts
+ * @returns {string[]}
+ */
+export function buildOpenCodeArgs({ message, sessionId, model, imagePaths = [] }) {
   const args = ['run', '--format', 'json'];
   const modelFlag = resolveModelFlag(model);
   if (modelFlag) {
@@ -248,8 +268,14 @@ function buildOpenCodeArgs({ message, sessionId, model }) {
   if (isNonEmptySessionId(sessionId)) {
     args.push('--session', sessionId.trim());
   }
-  // Keep prompt positional (opencode run -- <msg> is broken on some versions).
+  // Prompt before file flags so yargs does not treat it as another --file value.
   args.push(safePromptArg(message));
+  // Multimodal: `opencode run <prompt> -f <path>`
+  for (const imagePath of imagePaths) {
+    if (imagePath) {
+      args.push('-f', imagePath);
+    }
+  }
   return args;
 }
 
@@ -259,24 +285,45 @@ function buildOpenCodeArgs({ message, sessionId, model }) {
  * @param {string} cwd
  * @param {string} model
  * @param {string} [_reasoningEffort]
+ * @param {Array} [attachments] image attachments (fileName/mediaType/data)
  */
 export async function sendMessage(
   message,
   sessionId = '',
   cwd = '',
   model = '',
-  _reasoningEffort = ''
+  _reasoningEffort = '',
+  attachments = []
 ) {
   beginStream();
 
+  let imagePaths = [];
+  try {
+    imagePaths = await materializeImageAttachments(attachments);
+  } catch (err) {
+    console.error('[OpenCode] failed to materialize image attachments:', err?.message || err);
+  }
+
+  // OpenCode requires a non-empty prompt even for image-only turns.
+  let promptText = message || '';
+  if (!String(promptText).trim() && imagePaths.length > 0) {
+    promptText = GROK_IMAGE_ONLY_FALLBACK_TEXT;
+  }
+
   const bin = resolveOpenCodeCliPath();
-  const args = buildOpenCodeArgs({ message, sessionId, model });
+  const args = buildOpenCodeArgs({ message: promptText, sessionId, model, imagePaths });
   let resolvedSessionId = isNonEmptySessionId(sessionId) ? sessionId.trim() : null;
   if (resolvedSessionId) {
     emitSessionId(resolvedSessionId);
   }
 
-  logDebug('spawn', bin, args.slice(0, -1).join(' '), `promptLen=${String(message || '').length}`);
+  logDebug(
+    'spawn',
+    bin,
+    `format=json model=${model || '-'} session=${resolvedSessionId || '-'}`,
+    `promptLen=${String(promptText || '').length}`,
+    `images=${imagePaths.length}`
+  );
 
   const env = { ...process.env };
   const home = process.env.HOME || process.env.USERPROFILE || homedir();
@@ -285,6 +332,7 @@ export async function sendMessage(
   const workCwd = cwd && cwd !== 'undefined' && cwd !== 'null' ? cwd : process.cwd();
   const seenToolStarts = new Set();
 
+  try {
   await runCliStreaming({
     bin,
     args,
@@ -322,4 +370,7 @@ export async function sendMessage(
       }
     },
   });
+  } finally {
+    await cleanupMaterializedImagePaths(imagePaths);
+  }
 }

@@ -6,6 +6,7 @@ import { MessageItem } from './MessageItem';
 import WaitingIndicator from './WaitingIndicator';
 import { ContextMenu } from './ContextMenu';
 import { useContextMenu, copySelection } from '../hooks/useContextMenu.js';
+import { quoteToChatInput } from '../utils/quoteUtils';
 import type { MessageListRevealHandle } from './ConversationSearch/types';
 import {
   DETAILED_OUTPUT_ENABLED_EVENT,
@@ -130,14 +131,33 @@ export const MessageList = memo(forwardRef<MessageListRevealHandle, MessageListP
     getDetailedOutputEnabled()
   );
 
-  // Context menu for message list (copy only, when text selected)
+  // Context menu for message list (copy + quote, when text selected)
   const ctxMenu = useContextMenu();
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
   const handleMessageContextMenu = useCallback((e: React.MouseEvent) => {
     const sel = window.getSelection();
     if (sel && sel.toString().trim().length > 0) {
       ctxMenu.open(e);
     }
   }, [ctxMenu.open]);
+
+  // Hotkey (Ctrl/Cmd+Shift+Q): quote the current selection when it lives inside the message list.
+  useEffect(() => {
+    const handleQuoteHotkey = (event: KeyboardEvent) => {
+      if (event.key.toLowerCase() !== 'q' || !event.shiftKey || !(event.ctrlKey || event.metaKey)) return;
+      const sel = window.getSelection();
+      const selectedText = sel?.toString() ?? '';
+      if (!selectedText.trim()) return;
+      const anchor = sel?.anchorNode ?? null;
+      const anchorElement = anchor instanceof Element ? anchor : anchor?.parentElement ?? null;
+      if (!containerRef.current || !anchorElement || !containerRef.current.contains(anchorElement)) return;
+      event.preventDefault();
+      quoteToChatInput(selectedText);
+    };
+    window.addEventListener('keydown', handleQuoteHotkey);
+    return () => window.removeEventListener('keydown', handleQuoteHotkey);
+  }, []);
 
   // Use explicit session identity in production; keep the message boundary for isolated callers/tests.
   const previousSessionRef = useRef(currentSessionId);
@@ -262,13 +282,14 @@ export const MessageList = memo(forwardRef<MessageListRevealHandle, MessageListP
     [messages, shouldCollapse, collapsedCount]
   );
   return (
-    <div onContextMenu={handleMessageContextMenu}>
+    <div ref={containerRef} onContextMenu={handleMessageContextMenu}>
       {ctxMenu.visible && (
         <ContextMenu
           x={ctxMenu.x}
           y={ctxMenu.y}
           onClose={ctxMenu.close}
           items={[
+            { label: t('contextMenu.quote', 'Quote'), action: () => quoteToChatInput(ctxMenu.selectedText) },
             { label: t('contextMenu.copy', 'Copy'), action: () => copySelection(ctxMenu.savedRange, ctxMenu.selectedText) },
           ]}
         />

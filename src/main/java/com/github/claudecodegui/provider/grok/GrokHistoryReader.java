@@ -65,7 +65,7 @@ public class GrokHistoryReader {
         public String cwd;
         public long fileSize;
         public String provider = "grok";
-        /** Model id used by this session when known (e.g. grok-4.5). */
+        /** Model id used by this session when known (e.g. grok-4.6). */
         public String model;
     }
 

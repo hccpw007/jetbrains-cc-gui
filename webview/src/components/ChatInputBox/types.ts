@@ -391,31 +391,43 @@ export const CODEX_MODELS: ModelInfo[] = [
 ];
 
 /**
- * Grok CLI `-m` value must be a **config profile name** from
- * `~/.grok/config.toml` (`[model."name"]`), NOT the nested `model = "grok-4.5"`
- * upstream id. Your default profile is typically:
+ * Default model id sent to the Grok ACP CLI via `session/set_model` /
+ * `_meta.modelId`. The ACP CLI only accepts real upstream model ids —
+ * sentinel values like `grok` / `default` / `(default)` are rejected with
+ * "unknown model id", so the bridge (`normalizeGrokModelId`) and the Java
+ * side (`normalizeCliModelForProvider`) normalize them to this value.
  *
- *   [models]
- *   default = "grok"
- *
- *   [model."grok"]
- *   model = "grok-4.5"
- *   base_url = "..."
- *   api_key = "..."
- *
- * Passing `-m grok-4.5` hits official cli-chat-proxy and ignores custom base_url/api_key.
+ * Note: this id goes straight to the upstream API; it does NOT resolve
+ * `~/.grok/config.toml` `[model."name"]` profiles the way the legacy
+ * `-m <profile>` path did, so custom per-profile base_url/api_key from
+ * config.toml may not apply here.
  */
-export const GROK_DEFAULT_MODEL_ID = 'grok';
+export const GROK_DEFAULT_MODEL_ID = 'grok-4.6';
 
 /**
  * Grok CLI model picker entries.
- * id = profile name for CLI `-m`; label can show the human-facing model name.
+ * id = model ID passed via ACP session/set_model or _meta.modelId.
  */
 export const GROK_MODELS: ModelInfo[] = [
   {
     id: GROK_DEFAULT_MODEL_ID,
-    label: 'Grok 4.5',
-    description: 'xAI Grok 4.5',
+    label: 'Grok 4.6',
+    description: 'xAI Grok 4.6',
+  },
+  {
+    id: 'grok-3',
+    label: 'Grok 3',
+    description: 'xAI Grok 3',
+  },
+  {
+    id: 'grok-2',
+    label: 'Grok 2',
+    description: 'xAI Grok 2',
+  },
+  {
+    id: 'grok-beta',
+    label: 'Grok Beta',
+    description: 'xAI Grok Beta',
   },
 ];
 

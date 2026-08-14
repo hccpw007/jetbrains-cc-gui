@@ -233,11 +233,20 @@
         "providerUnavailable": "Currently unavailable",
         "provider": {
           "claude": "Claude Code",
-          "codex": "Codex"
+          "codex": "Codex",
+          "grok": "Grok CLI",
+          "kimi": "Kimi CLI",
+          "opencode": "OpenCode",
+          "pi": "PI CLI"
         },
         "currentProviderAuto": "Currently using automatic selection: {{provider}}",
         "currentProviderManual": "Currently using manually selected provider: {{provider}}",
-        "currentProviderUnavailable": "The selected provider is currently unavailable: {{provider}}"
+        "currentProviderUnavailable": "The selected provider is currently unavailable: {{provider}}",
+        "modeLabel": "Режим выбора",
+        "modeAuto": "Авто",
+        "modeManual": "Вручную",
+        "autoSummary": "Следует текущему чат CLI · сейчас {{provider}}",
+        "autoUnavailable": "Нет доступного CLI. Переключитесь на ручной выбор."
       },
       "diffExpanded": {
         "label": "Разворачивать diff по умолчанию",
@@ -422,7 +431,12 @@
         "providerUnavailable": "Недоступно",
         "currentProviderAuto": "Сейчас используется автоматический выбор: {{provider}}",
         "currentProviderManual": "Сейчас используется выбранный вручную провайдер: {{provider}}",
-        "currentProviderUnavailable": "Выбранный провайдер сейчас недоступен: {{provider}}"
+        "currentProviderUnavailable": "Выбранный провайдер сейчас недоступен: {{provider}}",
+        "modeLabel": "Режим выбора",
+        "modeAuto": "Авто",
+        "modeManual": "Вручную",
+        "autoSummary": "Следует текущему чат CLI · сейчас {{provider}}",
+        "autoUnavailable": "Нет доступного CLI. Переключитесь на ручной выбор."
       },
       "prompt": {
         "label": "Дополнительный промпт",
@@ -1090,7 +1104,13 @@
   "markdown": {
     "copyCode": "Копировать код",
     "copyMessage": "Копировать сообщение",
-    "copySuccess": "Скопировано!"
+    "copySuccess": "Скопировано!",
+    "quoteMessage": "Цитировать сообщение",
+    "quoteSuccess": "Процитировано!"
+  },
+  "contextMenu": {
+    "copy": "Копировать",
+    "quote": "Цитировать"
   },
   "usage": {
     "checkingLabel": "Проверка tokentracker-cli…",
@@ -1342,6 +1362,25 @@
     "allCompleted": "Все завершены {{completed}}/{{total}} задач",
     "stopped": "Остановлено"
   },
+  "subagent": {
+    "process": {
+      "title": "Процесс агента",
+      "prompt": "Промпт",
+      "thought": "Размышление",
+      "filesRead_one": "Прочитан {{count}} файл",
+      "filesRead_other": "Прочитано {{count}} файлов",
+      "otherTools": "Другие инструменты",
+      "result": "Результат",
+      "showFullOutput": "Показать полный вывод",
+      "loading": "Загрузка процесса агента…",
+      "unavailable": "Журнал процесса недоступен, пока у сессии нет id.",
+      "reportGenerated": "Сформирован структурированный аналитический отчёт",
+      "unitMs": "мс",
+      "unitS": "с",
+      "unitTools": "инструментов",
+      "unitTokens": "токенов"
+    }
+  },
   "statusPanel": {
     "todoTab": "План",
     "tasksTab": "Задачи",
@@ -1516,6 +1555,9 @@
     "searchPlaceholder": "Поиск моделей",
     "noModelsFound": "Модели не найдены",
     "hiddenModelCount": "+ {{count}} дополнительных моделей. Введите текст для поиска.",
+    "pinned": "Закреплённые",
+    "pin": "Закрепить",
+    "unpin": "Открепить",
     "claude": {
       "sonnet46": {
         "label": "Sonnet 4.6",
@@ -1652,7 +1694,18 @@
     "keepOriginal": "Оставить исходный",
     "enhanceFailed": "Не удалось улучшить",
     "emptyPrompt": "Сначала введите промпт",
-    "copyEnhanced": "Копировать улучшенный"
+    "copyEnhanced": "Копировать улучшенный",
+    "modeLabel": "Режим",
+    "modeAuto": "Авто",
+    "modeManual": "Вручную",
+    "modeUnavailable": "Недоступно",
+    "providerLabel": "CLI",
+    "providerUnresolved": "CLI не определён",
+    "modelLabel": "Модель",
+    "modelUnresolved": "Модель по умолчанию",
+    "openSettings": "Настроить",
+    "openSettingsTooltip": "Открыть настройки улучшения промпта",
+    "resolvingUsage": "Определение конфигурации…"
   },
   "fileContext": {
     "placeholder": "Файловый контекст",

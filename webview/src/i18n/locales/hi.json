@@ -233,11 +233,20 @@
         "providerUnavailable": "Currently unavailable",
         "provider": {
           "claude": "Claude Code",
-          "codex": "Codex"
+          "codex": "Codex",
+          "grok": "Grok CLI",
+          "kimi": "Kimi CLI",
+          "opencode": "OpenCode",
+          "pi": "PI CLI"
         },
         "currentProviderAuto": "Currently using automatic selection: {{provider}}",
         "currentProviderManual": "Currently using manually selected provider: {{provider}}",
-        "currentProviderUnavailable": "The selected provider is currently unavailable: {{provider}}"
+        "currentProviderUnavailable": "The selected provider is currently unavailable: {{provider}}",
+        "modeLabel": "चयन मोड",
+        "modeAuto": "स्वचालित",
+        "modeManual": "मैनुअल",
+        "autoSummary": "वर्तमान चैट CLI का अनुसरण · वर्तमान में {{provider}}",
+        "autoUnavailable": "कोई CLI उपलब्ध नहीं। मैन्युअल चुनें।"
       },
       "diffExpanded": {
         "label": "डिफ़ॉल्ट रूप से अंतर दिखाएं",
@@ -422,7 +431,12 @@
         "providerUnavailable": "अनुपलब्ध",
         "currentProviderAuto": "वर्तमान में स्वचालित चयन का उपयोग: {{provider}}",
         "currentProviderManual": "वर्तमान में मैन्युअल रूप से चयनित प्रदाता का उपयोग: {{provider}}",
-        "currentProviderUnavailable": "चयनित प्रदाता वर्तमान में अनुपलब्ध है: {{provider}}"
+        "currentProviderUnavailable": "चयनित प्रदाता वर्तमान में अनुपलब्ध है: {{provider}}",
+        "modeLabel": "चयन मोड",
+        "modeAuto": "स्वचालित",
+        "modeManual": "मैनुअल",
+        "autoSummary": "वर्तमान चैट CLI का अनुसरण · वर्तमान में {{provider}}",
+        "autoUnavailable": "कोई CLI उपलब्ध नहीं। मैन्युअल चुनें।"
       },
       "prompt": {
         "label": "Additional Prompt",
@@ -1063,7 +1077,13 @@
   "markdown": {
     "copyCode": "कोड कॉपी करें",
     "copyMessage": "संदेश कॉपी करें",
-    "copySuccess": "कॉपी हो गया"
+    "copySuccess": "कॉपी हो गया",
+    "quoteMessage": "संदेश उद्धृत करें",
+    "quoteSuccess": "उद्धृत किया गया!"
+  },
+  "contextMenu": {
+    "copy": "कॉपी करें",
+    "quote": "उद्धृत करें"
   },
   "usage": {
     "checkingLabel": "tokentracker-cli की जाँच हो रही है…",
@@ -1315,6 +1335,25 @@
     "allCompleted": "{{completed}}/{{total}} कार्य पूर्ण",
     "stopped": "रुका हुआ"
   },
+  "subagent": {
+    "process": {
+      "title": "एजेंट प्रक्रिया",
+      "prompt": "प्रॉम्प्ट",
+      "thought": "विचार",
+      "filesRead_one": "{{count}} फ़ाइल पढ़ें",
+      "filesRead_other": "{{count}} फ़ाइलें पढ़ें",
+      "otherTools": "अन्य उपकरण",
+      "result": "परिणाम",
+      "showFullOutput": "पूरा आउटपुट देखें",
+      "loading": "एजेंट प्रक्रिया लोड हो रही है…",
+      "unavailable": "जब तक सत्र का id नहीं है, प्रक्रिया लॉग उपलब्ध नहीं है।",
+      "reportGenerated": "संरचित विश्लेषण रिपोर्ट तैयार की गई",
+      "unitMs": "मि॰से॰",
+      "unitS": "से॰",
+      "unitTools": "उपकरण",
+      "unitTokens": "टोकन"
+    }
+  },
   "statusPanel": {
     "todoTab": "योजना",
     "tasksTab": "कार्य",
@@ -1489,6 +1528,9 @@
     "searchPlaceholder": "मॉडल खोजें",
     "noModelsFound": "कोई मॉडल नहीं मिला",
     "hiddenModelCount": "+ {{count}} और मॉडल. खोजने के लिए टाइप करें.",
+    "pinned": "पिन किए गए",
+    "pin": "पिन करें",
+    "unpin": "अनपिन करें",
     "claude": {
       "sonnet46": {
         "label": "Sonnet 4.6",
@@ -1625,7 +1667,18 @@
     "keepOriginal": "Keep Original",
     "enhanceFailed": "Failed to enhance prompt",
     "emptyPrompt": "Please enter a prompt first",
-    "copyEnhanced": "Copy Enhanced"
+    "copyEnhanced": "Copy Enhanced",
+    "modeLabel": "Mode",
+    "modeAuto": "Auto",
+    "modeManual": "Manual",
+    "modeUnavailable": "Unavailable",
+    "providerLabel": "CLI",
+    "providerUnresolved": "No CLI resolved",
+    "modelLabel": "Model",
+    "modelUnresolved": "Default model",
+    "openSettings": "Configure",
+    "openSettingsTooltip": "Open prompt enhancer settings",
+    "resolvingUsage": "Resolving runtime config…"
   },
   "fileContext": {
     "placeholder": "File Context",

@@ -10,8 +10,6 @@ import { usePluginModels } from '../hooks/usePluginModels';
 import { useConfiguredClaudeModelPricing } from '../hooks/useConfiguredModelPricing';
 import styles from './style.module.less';
 
-const BLOCK_STYLE: React.CSSProperties = { display: 'block' };
-const NONE_STYLE: React.CSSProperties = { display: 'none' };
 const ICON_14_STYLE: React.CSSProperties = { fontSize: 14 };
 const FLEX_1_STYLE: React.CSSProperties = { flex: 1 };
 
@@ -129,81 +127,88 @@ const ProviderTabSection = ({
         </button>
       </div>
 
-      {/* Use display to preserve component state across tab switches */}
-      <div id="panel-claude-providers" role="tabpanel" style={activeTab === 'claude' ? BLOCK_STYLE : NONE_STYLE}>
-        <div
-          className={styles.pluginModelsRow}
-          onClick={() => openModelDialog('claude')}
-          role="button"
-          tabIndex={0}
-          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') openModelDialog('claude'); }}
-        >
-          <span className="codicon codicon-symbol-misc" style={ICON_14_STYLE} />
-          <span className={styles.pluginModelsLabel}>
-            {t('settings.pluginModels.title')}
-          </span>
-          {claudeModels.models.length > 0 && (
-            <span className={styles.pluginModelsBadge}>{claudeModels.models.length}</span>
-          )}
-          <span style={FLEX_1_STYLE} />
-          <button
-            className={styles.pluginModelsManageBtn}
-            onClick={(e) => { e.stopPropagation(); openModelDialog('claude'); }}
+      {/* Mount only the active sub-tab. Previously display:none kept CliSection
+          mounted so get_cli_status ran as soon as the Providers tab opened. */}
+      {activeTab === 'claude' && (
+        <div id="panel-claude-providers" role="tabpanel">
+          <div
+            className={styles.pluginModelsRow}
+            onClick={() => openModelDialog('claude')}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') openModelDialog('claude'); }}
           >
-            {t('settings.pluginModels.manage')}
-          </button>
+            <span className="codicon codicon-symbol-misc" style={ICON_14_STYLE} />
+            <span className={styles.pluginModelsLabel}>
+              {t('settings.pluginModels.title')}
+            </span>
+            {claudeModels.models.length > 0 && (
+              <span className={styles.pluginModelsBadge}>{claudeModels.models.length}</span>
+            )}
+            <span style={FLEX_1_STYLE} />
+            <button
+              className={styles.pluginModelsManageBtn}
+              onClick={(e) => { e.stopPropagation(); openModelDialog('claude'); }}
+            >
+              {t('settings.pluginModels.manage')}
+            </button>
+          </div>
+          <ProviderManageSection
+            providers={providers}
+            loading={loading}
+            onAddProvider={onAddProvider}
+            onEditProvider={onEditProvider}
+            onDeleteProvider={onDeleteProvider}
+            onSwitchProvider={onSwitchProvider}
+            addToast={addToast}
+            showHeader={false}
+          />
         </div>
-        <ProviderManageSection
-          providers={providers}
-          loading={loading}
-          onAddProvider={onAddProvider}
-          onEditProvider={onEditProvider}
-          onDeleteProvider={onDeleteProvider}
-          onSwitchProvider={onSwitchProvider}
-          addToast={addToast}
-          showHeader={false}
-        />
-      </div>
+      )}
 
-      <div id="panel-codex-providers" role="tabpanel" style={activeTab === 'codex' ? BLOCK_STYLE : NONE_STYLE}>
-        <div
-          className={styles.pluginModelsRow}
-          onClick={() => openModelDialog('codex')}
-          role="button"
-          tabIndex={0}
-          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') openModelDialog('codex'); }}
-        >
-          <span className="codicon codicon-symbol-misc" style={ICON_14_STYLE} />
-          <span className={styles.pluginModelsLabel}>
-            {t('settings.pluginModels.title')}
-          </span>
-          {codexModels.models.length > 0 && (
-            <span className={styles.pluginModelsBadge}>{codexModels.models.length}</span>
-          )}
-          <span style={FLEX_1_STYLE} />
-          <button
-            className={styles.pluginModelsManageBtn}
-            onClick={(e) => { e.stopPropagation(); openModelDialog('codex'); }}
+      {activeTab === 'codex' && (
+        <div id="panel-codex-providers" role="tabpanel">
+          <div
+            className={styles.pluginModelsRow}
+            onClick={() => openModelDialog('codex')}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') openModelDialog('codex'); }}
           >
-            {t('settings.pluginModels.manage')}
-          </button>
+            <span className="codicon codicon-symbol-misc" style={ICON_14_STYLE} />
+            <span className={styles.pluginModelsLabel}>
+              {t('settings.pluginModels.title')}
+            </span>
+            {codexModels.models.length > 0 && (
+              <span className={styles.pluginModelsBadge}>{codexModels.models.length}</span>
+            )}
+            <span style={FLEX_1_STYLE} />
+            <button
+              className={styles.pluginModelsManageBtn}
+              onClick={(e) => { e.stopPropagation(); openModelDialog('codex'); }}
+            >
+              {t('settings.pluginModels.manage')}
+            </button>
+          </div>
+          <CodexProviderSection
+            codexProviders={codexProviders}
+            codexLoading={codexLoading}
+            onAddCodexProvider={onAddCodexProvider}
+            onEditCodexProvider={onEditCodexProvider}
+            onDeleteCodexProvider={onDeleteCodexProvider}
+            onSwitchCodexProvider={onSwitchCodexProvider}
+            onRevokeCodexLocalConfigAuthorization={onRevokeCodexLocalConfigAuthorization}
+            addToast={addToast}
+            showHeader={false}
+          />
         </div>
-        <CodexProviderSection
-          codexProviders={codexProviders}
-          codexLoading={codexLoading}
-          onAddCodexProvider={onAddCodexProvider}
-          onEditCodexProvider={onEditCodexProvider}
-          onDeleteCodexProvider={onDeleteCodexProvider}
-          onSwitchCodexProvider={onSwitchCodexProvider}
-          onRevokeCodexLocalConfigAuthorization={onRevokeCodexLocalConfigAuthorization}
-          addToast={addToast}
-          showHeader={false}
-        />
-      </div>
+      )}
 
-      <div id="panel-cli-tools" role="tabpanel" style={activeTab === 'cli' ? BLOCK_STYLE : NONE_STYLE}>
-        <CliSection addToast={addToast} />
-      </div>
+      {activeTab === 'cli' && (
+        <div id="panel-cli-tools" role="tabpanel">
+          <CliSection addToast={addToast} />
+        </div>
+      )}
 
       {/* Shared model management dialog */}
       <CustomModelDialog

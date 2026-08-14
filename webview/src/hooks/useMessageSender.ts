@@ -7,6 +7,7 @@ import {
   apply1MContextSuffix,
 } from '../components/ChatInputBox/types';
 import type { Attachment, ChatInputBoxHandle, PermissionMode, ReasoningEffort, SelectedAgent, CodexFastMode } from '../components/ChatInputBox/types';
+import { expandQuoteTokens } from '../components/ChatInputBox/utils/quoteRegistry';
 import type { ViewMode } from './useModelProviderState';
 
 /**
@@ -312,7 +313,8 @@ export function useMessageSender({
    * Execute message sending (from queue or directly)
    */
   const executeMessage = useCallback((content: string, attachments?: Attachment[]) => {
-    const text = content.replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
+    // Expand inline quote chips (tokens) into their full Markdown blockquotes.
+    const text = expandQuoteTokens(content).replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
     const hasAttachments = Array.isArray(attachments) && attachments.length > 0;
 
     if (!text && !hasAttachments) return;

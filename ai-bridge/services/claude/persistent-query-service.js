@@ -37,7 +37,9 @@ import {
   setCachedQueryFn,
   touchRuntime,
   createTurnSink,
+  emitTaskEvent,
 } from './runtime-lifecycle.js';
+import { parseTaskNotificationXml, buildTaskNotificationEvent, extractTaskNotificationXml } from './task-notification-parser.js';
 import {
   SESSION_CLEANUP_INTERVAL_MS,
   clearActiveTurnRuntime,
@@ -308,6 +310,29 @@ _sessionCleanupTimer.unref();
       // session stream, otherwise the subagent's internals pollute the main chat.
       // task_notification (type:'system') has no parent_tool_use_id and is preserved.
       if (msg?.parent_tool_use_id) {
+        continue;
+      }
+
+      // In-turn task-notification: a background agent that finishes while the
+      // main turn is still live delivers its report as a <task-notification>
+      // XML, either in a plain user message's content or a queued_command
+      // attachment's prompt — not as an SDK event. Synthesize the
+      // task_notification the SDK no longer emits and continue, so the report
+      // reaches the frontend subagent card and the raw XML never leaks into the
+      // [MESSAGE] stream (which would only render as an opaque user message).
+      // The frontend also recovers these from history on its own.
+      const taskNotificationXml = extractTaskNotificationXml(msg);
+      if (taskNotificationXml !== null) {
+        const parsed = parseTaskNotificationXml(taskNotificationXml);
+        const event = buildTaskNotificationEvent(parsed);
+        if (event && runtime.sessionId) {
+          console.log('[LIFECYCLE] In-turn task-notification message for sessionId=' + runtime.sessionId + ', toolUseId=' + parsed.toolUseId + ', status=' + event.status);
+          emitTaskEvent(runtime.sessionId, event);
+        } else if (!event) {
+          console.log('[LIFECYCLE] In-turn task-notification message could not be parsed (no tool_use_id or non-terminal status), consuming silently');
+        } else {
+          console.log('[LIFECYCLE] In-turn task-notification message for anonymous runtime, consuming silently');
+        }
         continue;
       }
 

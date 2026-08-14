@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef, useState, type RefObject } from 'react';
 
 /** Collapse labels when left selectors would come within this many px of the send cluster. */
-export const TOOLBAR_SELECTOR_MIN_GAP_PX = 20;
+export const TOOLBAR_SELECTOR_MIN_GAP_PX = 10;
 
 /**
  * Whether toolbar selector labels should collapse to icon-only mode.
@@ -61,7 +61,7 @@ export function measureExpandedLeftWidth(root: HTMLElement, left: HTMLElement): 
 
 /**
  * Proximity-based toolbar compact mode for all CLI providers.
- * Hides selector labels when the left cluster would get within 20px of the send button.
+ * Hides selector labels when the left cluster would get within 10px of the send button.
  */
 export function useToolbarSelectorCompact(
   rootRef: RefObject<HTMLElement | null>,

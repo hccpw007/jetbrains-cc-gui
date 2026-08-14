@@ -42,7 +42,7 @@ tasks.named('checkstyleTest') {
 }
 
 group = 'com.github.idea-claude-code-gui'
-version = '0.5.1-fix1'
+version = '0.5.2'
 
 java {
     sourceCompatibility = JavaVersion.VERSION_17
@@ -240,6 +240,41 @@ patchPluginXml {
     }
 
     changeNotes = computedChangeNotes ?: '<p>No changelog found.</p>'
+}
+
+// macOS: Finder may recreate .DS_Store inside build/ while Gradle's Delete task is
+// removing it, which fails with "New files were found". Bypass Gradle's strict
+// directory-delete check and remove build/ with a tolerant strategy instead.
+tasks.named('clean', Delete) {
+    // Clear targets registered by the Java plugin so the strict Delete action is a no-op.
+    delete = []
+    doLast {
+        def buildDir = layout.buildDirectory.get().asFile
+        if (!buildDir.exists()) {
+            return
+        }
+        // Prefer shell rm on macOS — more resilient to concurrent .DS_Store writes.
+        def isMac = System.getProperty('os.name', '').toLowerCase().contains('mac')
+        if (isMac) {
+            providers.exec {
+                commandLine 'rm', '-rf', buildDir.absolutePath
+            }.result.get()
+        } else {
+            ant.delete(dir: buildDir, failonerror: false)
+        }
+        if (buildDir.exists()) {
+            // One more attempt after stripping junk metadata files
+            buildDir.eachFileRecurse(groovy.io.FileType.FILES) { f ->
+                if (f.name == '.DS_Store' || f.name == 'Thumbs.db') {
+                    f.delete()
+                }
+            }
+            ant.delete(dir: buildDir, failonerror: false)
+        }
+        if (buildDir.exists()) {
+            throw new GradleException("Unable to delete build directory: ${buildDir}")
+        }
+    }
 }
 
 // Disable product-specific searchable options/instrument tasks if present

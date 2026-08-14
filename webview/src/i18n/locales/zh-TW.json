@@ -233,11 +233,20 @@
         "providerUnavailable": "目前不可用",
         "provider": {
           "claude": "Claude Code",
-          "codex": "Codex"
+          "codex": "Codex",
+          "grok": "Grok CLI",
+          "kimi": "Kimi CLI",
+          "opencode": "OpenCode",
+          "pi": "PI CLI"
         },
         "currentProviderAuto": "目前使用自動選擇：{{provider}}",
         "currentProviderManual": "目前使用手動選擇的 provider：{{provider}}",
-        "currentProviderUnavailable": "目前所選 provider 不可用：{{provider}}"
+        "currentProviderUnavailable": "目前所選 provider 不可用：{{provider}}",
+        "modeLabel": "使用方式",
+        "modeAuto": "自動",
+        "modeManual": "手動",
+        "autoSummary": "自動跟隨目前聊天 CLI · 現在解析為 {{provider}}",
+        "autoUnavailable": "目前沒有可用的 CLI，請切換到手動並選擇。"
       },
       "diffExpanded": {
         "label": "預設展開差異",
@@ -422,7 +431,12 @@
         "providerUnavailable": "當前不可用",
         "currentProviderAuto": "當前使用自動選擇：{{provider}}",
         "currentProviderManual": "當前使用手動選擇的 provider：{{provider}}",
-        "currentProviderUnavailable": "當前所選 provider 不可用：{{provider}}"
+        "currentProviderUnavailable": "當前所選 provider 不可用：{{provider}}",
+        "modeLabel": "使用方式",
+        "modeAuto": "自動",
+        "modeManual": "手動",
+        "autoSummary": "自動跟隨目前聊天 CLI · 現在解析為 {{provider}}",
+        "autoUnavailable": "目前沒有可用的 CLI，請切換到手動並選擇。"
       },
       "prompt": {
         "label": "Additional Prompt",
@@ -1068,7 +1082,13 @@
   "markdown": {
     "copyCode": "複製程式碼",
     "copyMessage": "複製訊息",
-    "copySuccess": "複製成功"
+    "copySuccess": "複製成功",
+    "quoteMessage": "引用訊息",
+    "quoteSuccess": "已引用！"
+  },
+  "contextMenu": {
+    "copy": "複製",
+    "quote": "引用"
   },
   "usage": {
     "checkingLabel": "正在偵測 tokentracker-cli…",
@@ -1321,6 +1341,25 @@
     "stopped": "已停止",
     "progress": "已完成 {{completed}}/{{total}} 個任務"
   },
+  "subagent": {
+    "process": {
+      "title": "Agent 程序",
+      "prompt": "提示詞",
+      "thought": "思考",
+      "filesRead_one": "讀取 {{count}} 個檔案",
+      "filesRead_other": "讀取 {{count}} 個檔案",
+      "otherTools": "其他工具",
+      "result": "結果",
+      "showFullOutput": "檢視完整輸出",
+      "loading": "正在載入 Agent 程序…",
+      "unavailable": "本次工作階段未產生程序記錄（需要工作階段 ID）。",
+      "reportGenerated": "已產生結構化分析報告",
+      "unitMs": "毫秒",
+      "unitS": "秒",
+      "unitTools": "個工具",
+      "unitTokens": "tokens"
+    }
+  },
   "statusPanel": {
     "todoTab": "計畫",
     "tasksTab": "任務",
@@ -1495,6 +1534,9 @@
     "searchPlaceholder": "搜尋模型",
     "noModelsFound": "找不到模型",
     "hiddenModelCount": "+ 還有 {{count}} 個模型。輸入以搜尋。",
+    "pinned": "置頂",
+    "pin": "置頂",
+    "unpin": "取消置頂",
     "claude": {
       "sonnet46": {
         "label": "Sonnet 4.6",
@@ -1642,7 +1684,18 @@
     "keepOriginal": "Keep Original",
     "enhanceFailed": "Failed to enhance prompt",
     "emptyPrompt": "Please enter a prompt first",
-    "copyEnhanced": "Copy Enhanced"
+    "copyEnhanced": "Copy Enhanced",
+    "modeLabel": "模式",
+    "modeAuto": "自動",
+    "modeManual": "手動",
+    "modeUnavailable": "不可用",
+    "providerLabel": "CLI",
+    "providerUnresolved": "未解析 CLI",
+    "modelLabel": "模型",
+    "modelUnresolved": "預設模型",
+    "openSettings": "設定",
+    "openSettingsTooltip": "開啟增強提示詞設定",
+    "resolvingUsage": "正在解析執行設定…"
   },
   "fileContext": {
     "placeholder": "檔案上下文",

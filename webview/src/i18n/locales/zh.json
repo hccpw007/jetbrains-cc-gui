@@ -404,11 +404,20 @@
         "providerUnavailable": "当前不可用",
         "provider": {
           "claude": "Claude Code",
-          "codex": "Codex"
+          "codex": "Codex",
+          "grok": "Grok CLI",
+          "kimi": "Kimi CLI",
+          "opencode": "OpenCode",
+          "pi": "PI CLI"
         },
         "currentProviderAuto": "当前使用自动选择：{{provider}}",
         "currentProviderManual": "当前使用手动选择的 provider：{{provider}}",
-        "currentProviderUnavailable": "当前所选 provider 不可用：{{provider}}"
+        "currentProviderUnavailable": "当前所选 provider 不可用：{{provider}}",
+        "modeLabel": "使用方式",
+        "modeAuto": "自动",
+        "modeManual": "手动",
+        "autoSummary": "自动跟随当前聊天 CLI · 现在解析为 {{provider}}",
+        "autoUnavailable": "当前没有可用的 CLI，请切换到手动并选择。"
       },
       "diffExpanded": {
         "label": "默认展开差异",
@@ -688,7 +697,12 @@
         "providerUnavailable": "当前不可用",
         "currentProviderAuto": "当前使用自动选择：{{provider}}",
         "currentProviderManual": "当前使用手动选择的 provider：{{provider}}",
-        "currentProviderUnavailable": "当前所选 provider 不可用：{{provider}}"
+        "currentProviderUnavailable": "当前所选 provider 不可用：{{provider}}",
+        "modeLabel": "使用方式",
+        "modeAuto": "自动",
+        "modeManual": "手动",
+        "autoSummary": "自动跟随当前聊天 CLI · 现在解析为 {{provider}}",
+        "autoUnavailable": "当前没有可用的 CLI，请切换到手动并选择。"
       },
       "prompt": {
         "label": "附加提示词",
@@ -1410,7 +1424,13 @@
   "markdown": {
     "copyCode": "复制代码",
     "copyMessage": "复制消息",
-    "copySuccess": "复制成功"
+    "copySuccess": "复制成功",
+    "quoteMessage": "引用消息",
+    "quoteSuccess": "已引用！"
+  },
+  "contextMenu": {
+    "copy": "复制",
+    "quote": "引用"
   },
   "usage": {
     "checkingLabel": "正在检测 tokentracker-cli…",
@@ -1670,6 +1690,7 @@
   "subagent": {
     "process": {
       "title": "Agent 进程",
+      "prompt": "提示词",
       "thought": "思考",
       "filesRead_one": "读取 {{count}} 个文件",
       "filesRead_other": "读取 {{count}} 个文件",
@@ -1883,6 +1904,9 @@
     "searchPlaceholder": "搜索模型",
     "noModelsFound": "未找到模型",
     "hiddenModelCount": "+ 还有 {{count}} 个模型。输入以搜索。",
+    "pinned": "置顶",
+    "pin": "置顶",
+    "unpin": "取消置顶",
     "longContext": {
       "label": "1M",
       "shortLabel": "1M上下文",
@@ -1946,9 +1970,9 @@
       }
     },
     "grok": {
-      "grok45": {
-        "label": "Grok 4.5",
-        "description": "xAI Grok 4.5"
+      "grok46": {
+        "label": "Grok 4.6",
+        "description": "xAI Grok 4.6"
       }
     }
   },
@@ -2036,7 +2060,18 @@
     "keepOriginal": "保留原始版本",
     "enhanceFailed": "增强提示词失败",
     "emptyPrompt": "请先输入提示词",
-    "copyEnhanced": "复制增强版本"
+    "copyEnhanced": "复制增强版本",
+    "modeLabel": "模式",
+    "modeAuto": "自动",
+    "modeManual": "手动",
+    "modeUnavailable": "不可用",
+    "providerLabel": "CLI",
+    "providerUnresolved": "未解析 CLI",
+    "modelLabel": "模型",
+    "modelUnresolved": "默认模型",
+    "openSettings": "配置",
+    "openSettingsTooltip": "打开增强提示词设置",
+    "resolvingUsage": "正在解析运行配置…"
   },
   "fileContext": {
     "placeholder": "文件上下文",

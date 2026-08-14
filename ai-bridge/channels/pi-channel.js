@@ -21,16 +21,18 @@ export async function handlePiCommand(command, args, stdinData) {
           cwd,
           model,
           reasoningEffort,
+          attachments,
         } = stdinData;
         await piSendMessage(
           message,
           sessionId || '',
           cwd || '',
           model || '',
-          reasoningEffort || ''
+          reasoningEffort || '',
+          attachments || []
         );
       } else {
-        await piSendMessage(args[0], args[1], args[2], args[3], args[4]);
+        await piSendMessage(args[0], args[1], args[2], args[3], args[4], []);
       }
       break;
     }

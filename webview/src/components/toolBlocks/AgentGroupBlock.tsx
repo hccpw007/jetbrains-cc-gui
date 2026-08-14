@@ -9,6 +9,7 @@ import {
   isAsyncAgentInput,
   parseAgentToolMeta,
   parseSpawnAgentMeta,
+  readToolUseStatus,
 } from '../../utils/subagentResult';
 import {
   useSubagentHistories,
@@ -85,8 +86,10 @@ const AgentGroupBlock = memo(function AgentGroupBlock({
   // tool_result; its real terminal status arrives later via task_notification,
   // so stay "running" until that event lands. Sync agents complete inline.
   // isAsyncAgentInput centralizes the strict === true check (and the snake/camel
-  // guard) shared with useSubagents and TaskExecutionBlock.
-  const isAsync = isAsyncAgentInput(input, toolName);
+  // guard) shared with useSubagents and TaskExecutionBlock. The launch ack text
+  // and tool-use status are passed as fallbacks so an agent spawned without
+  // run_in_background is still recognized as async.
+  const isAsync = isAsyncAgentInput(input, toolName, result, readToolUseStatus(toolId ? getToolResultRaw(toolId) : null));
   const taskEvent = useTaskEvent(toolId);
   const taskFailed = taskEvent?.status === 'failed' || taskEvent?.status === 'stopped';
 
@@ -209,6 +212,7 @@ const AgentGroupBlock = memo(function AgentGroupBlock({
             totalTokens={(isAsync ? taskEvent?.totalTokens : undefined) ?? agentToolMeta.totalTokens}
             totalToolUseCount={(isAsync ? taskEvent?.totalToolUseCount : undefined) ?? agentToolMeta.totalToolUseCount}
             resultText={(isAsync ? taskEvent?.summary : undefined) ?? extractResultText(result)}
+            prompt={typeof input?.prompt === 'string' ? input.prompt : undefined}
             history={history}
             canLoad={Boolean(currentSessionId)}
           />

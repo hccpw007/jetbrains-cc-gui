@@ -35,7 +35,10 @@ function killChildTree(child, label) {
  * @param {string} options.label - log / error label
  * @param {(line: string) => void} options.onLine
  * @param {() => void} [options.onCloseBeforeEnd] - called before endStream once
- * @returns {Promise<{ code: number|null, signal: NodeJS.Signals|null, hadError: boolean }>}
+ * @param {(message: string) => void} [options.onError] - when set, called instead of
+ *   writing `[SEND_ERROR]` (used by session-less ask paths: prompt enhance / commit)
+ * @param {boolean} [options.emitEndStream=true] - when false, skip chat stream end markers
+ * @returns {Promise<{ code: number|null, signal: NodeJS.Signals|null, hadError: boolean, errorMessage?: string }>}
  */
 export function runCliStreaming({
   bin,
@@ -45,10 +48,27 @@ export function runCliStreaming({
   label,
   onLine,
   onCloseBeforeEnd,
+  onError,
+  emitEndStream = true,
 }) {
   return new Promise((resolve) => {
     let hadError = false;
+    let lastErrorMessage = '';
     let streamEnded = false;
+
+    const reportError = (message) => {
+      lastErrorMessage = String(message || `Unknown ${label} error`);
+      if (typeof onError === 'function') {
+        try {
+          onError(lastErrorMessage);
+        } catch (error) {
+          console.error(`[WARN][${label}] onError failed:`, error?.message || error);
+        }
+        return;
+      }
+      emitSendError(lastErrorMessage, label);
+    };
+
     const finish = (payload) => {
       if (streamEnded) return;
       streamEnded = true;
@@ -57,8 +77,13 @@ export function runCliStreaming({
       } catch (error) {
         console.error(`[WARN][${label}] onCloseBeforeEnd failed:`, error?.message || error);
       }
-      endStream();
-      resolve(payload);
+      if (emitEndStream !== false) {
+        endStream();
+      }
+      resolve({
+        ...payload,
+        ...(lastErrorMessage ? { errorMessage: lastErrorMessage } : {}),
+      });
     };
 
     let child;
@@ -74,7 +99,7 @@ export function runCliStreaming({
       });
     } catch (error) {
       hadError = true;
-      emitSendError(`Failed to spawn ${label} CLI (${bin}): ${error?.message || error}`, label);
+      reportError(`Failed to spawn ${label} CLI (${bin}): ${error?.message || error}`);
       finish({ code: null, signal: null, hadError });
       return;
     }
@@ -107,7 +132,7 @@ export function runCliStreaming({
       const hint = error?.code === 'ENOENT'
         ? `${label} CLI not found. Install it and ensure \`${bin}\` is on PATH.`
         : (error?.message || String(error));
-      emitSendError(hint, label);
+      reportError(hint);
     });
 
     child.on('close', (code, signal) => {
@@ -117,10 +142,9 @@ export function runCliStreaming({
 
       if (!hadError && code !== 0 && signal !== 'SIGTERM' && signal !== 'SIGINT') {
         const tail = stderrTail.trim().slice(-800);
-        emitSendError(
+        reportError(
           `${label} CLI exited with code ${code}${signal ? ` (signal ${signal})` : ''}`
-          + (tail ? `\n${tail}` : ''),
-          label
+          + (tail ? `\n${tail}` : '')
         );
         hadError = true;
       }

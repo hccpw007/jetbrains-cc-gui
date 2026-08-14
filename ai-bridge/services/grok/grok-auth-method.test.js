@@ -141,7 +141,7 @@ test('parseGrokConfigTomlCredentials reads default model api_key and base_url', 
 default = "grok"
 
 [model.grok]
-model = "grok-4.5"
+model = "grok-4.6"
 base_url = "https://fufei.mossx.ai/v1"
 api_key = "sk-test-from-config"
 api_backend = "responses"

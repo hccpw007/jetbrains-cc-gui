@@ -246,6 +246,28 @@ function isWhitespace(char: string): boolean {
 }
 
 /**
+ * Invisible characters (zero-width space/joiner, BOM) that IME composition can
+ * leave behind in the contenteditable. They must not count as "content" when
+ * deciding whether a trigger sits at line start, otherwise a residual invisible
+ * character silently blocks the / and # menus.
+ */
+const INVISIBLE_CHAR_REGEX = /[\u200B-\u200D\uFEFF]/;
+
+/**
+ * Check whether position `index` is at the start of a line, treating invisible
+ * zero-width characters as transparent.
+ */
+function isLineStart(text: string, index: number): boolean {
+  for (let i = index - 1; i >= 0; i--) {
+    const char = text[i];
+    if (char === '\n') return true;
+    if (INVISIBLE_CHAR_REGEX.test(char)) continue;
+    return false;
+  }
+  return true;
+}
+
+/**
  * Detect @ file reference trigger
  * Note: Skip rendered file tags to avoid false triggers after file tags
  */
@@ -299,9 +321,8 @@ function detectSlashTrigger(text: string, cursorPosition: number): TriggerQuery 
 
     // Found /
     if (char === '/') {
-      // Check if / is at line start
-      const isLineStart = start === 0 || text[start - 1] === '\n';
-      if (isLineStart) {
+      // Check if / is at line start (invisible IME residue is transparent)
+      if (isLineStart(text, start)) {
         const query = text.slice(start + 1, cursorPosition);
         return {
           trigger: '/',
@@ -336,9 +357,8 @@ function detectHashTrigger(text: string, cursorPosition: number): TriggerQuery |
 
     // Found #
     if (char === '#') {
-      // Check if # is at line start
-      const isLineStart = start === 0 || text[start - 1] === '\n';
-      if (isLineStart) {
+      // Check if # is at line start (invisible IME residue is transparent)
+      if (isLineStart(text, start)) {
         const query = text.slice(start + 1, cursorPosition);
         return {
           trigger: '#',

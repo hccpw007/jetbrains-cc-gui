@@ -6,30 +6,30 @@ import {
 } from './useToolbarSelectorCompact';
 
 describe('shouldCollapseToolbarSelectors', () => {
-  it('does not collapse when left + right leave at least 20px gap', () => {
-    // root 400, left 200, right 80 → used 280, free 120 ≥ 20
+  it('does not collapse when left + right leave at least 10px gap', () => {
+    // root 400, left 200, right 80 -> used 280, free 120 >= 10
     expect(shouldCollapseToolbarSelectors(400, 200, 80)).toBe(false);
   });
 
-  it('collapses when gap would be under 20px', () => {
-    // root 300, left 200, right 90 → 200+90+20=310 > 300
-    expect(shouldCollapseToolbarSelectors(300, 200, 90)).toBe(true);
+  it('collapses when gap would be under 10px', () => {
+    // root 300, left 200, right 91 -> 200+91+10=301 > 300
+    expect(shouldCollapseToolbarSelectors(300, 200, 91)).toBe(true);
   });
 
-  it('collapses exactly at the 20px boundary (equal means would not fit with gap)', () => {
-    // left + right + 20 === root → still need compact to preserve the gap
-    expect(shouldCollapseToolbarSelectors(300, 200, 80, 20)).toBe(true);
+  it('collapses exactly at the 10px boundary (equal means would not fit with gap)', () => {
+    // left + right + 10 === root -> still need compact to preserve the gap
+    expect(shouldCollapseToolbarSelectors(300, 200, 90, 10)).toBe(true);
   });
 
   it('does not collapse when free space equals min gap after content', () => {
-    // left 200 + right 80 + 20 = 300, root 301 → ok
-    expect(shouldCollapseToolbarSelectors(301, 200, 80, 20)).toBe(false);
+    // left 200 + right 90 + 10 = 300, root 301 -> ok
+    expect(shouldCollapseToolbarSelectors(301, 200, 90, 10)).toBe(false);
   });
 
-  it('uses TOOLBAR_SELECTOR_MIN_GAP_PX default of 20', () => {
-    expect(TOOLBAR_SELECTOR_MIN_GAP_PX).toBe(20);
-    expect(shouldCollapseToolbarSelectors(100, 50, 30)).toBe(true); // 50+30+20=100 → collapse at equality
-    expect(shouldCollapseToolbarSelectors(101, 50, 30)).toBe(false);
+  it('uses TOOLBAR_SELECTOR_MIN_GAP_PX default of 10', () => {
+    expect(TOOLBAR_SELECTOR_MIN_GAP_PX).toBe(10);
+    expect(shouldCollapseToolbarSelectors(90, 50, 30)).toBe(true); // 50+30+10=90 -> collapse at equality
+    expect(shouldCollapseToolbarSelectors(91, 50, 30)).toBe(false);
   });
 
   it('does not collapse for invalid / empty measurements', () => {
@@ -42,8 +42,8 @@ describe('shouldCollapseToolbarSelectors', () => {
     const right = 72; // enhance + send
     const wide = 400;
     const narrow = 280;
-    expect(shouldCollapseToolbarSelectors(wide, longModel, right)).toBe(false); // 220+72+20=312 < 400
-    expect(shouldCollapseToolbarSelectors(narrow, longModel, right)).toBe(true); // 312 > 280
+    expect(shouldCollapseToolbarSelectors(wide, longModel, right)).toBe(false); // 220+72+10=302 < 400
+    expect(shouldCollapseToolbarSelectors(narrow, longModel, right)).toBe(true); // 302 > 280
   });
 });
 

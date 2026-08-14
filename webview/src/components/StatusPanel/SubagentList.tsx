@@ -55,6 +55,7 @@ const SubagentRow = memo(({ subagent, isExpanded, history, canLoad, onToggle, t 
           totalTokens={subagent.totalTokens}
           totalToolUseCount={subagent.totalToolUseCount}
           resultText={subagent.resultText}
+          prompt={subagent.prompt}
           history={history}
           canLoad={canLoad}
         />

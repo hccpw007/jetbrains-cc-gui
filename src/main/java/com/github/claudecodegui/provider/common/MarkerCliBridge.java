@@ -1,5 +1,7 @@
 package com.github.claudecodegui.provider.common;
 
+import com.github.claudecodegui.session.ClaudeSession;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 
 import java.util.Collections;
@@ -151,12 +153,60 @@ public abstract class MarkerCliBridge extends BaseSDKBridge {
             String reasoningEffort,
             MessageCallback callback
     ) {
+        return sendMessage(channelId, message, sessionId, cwd, model, reasoningEffort, null, null, callback);
+    }
+
+    /**
+     * Send a message with optional image attachments.
+     *
+     * <p>Attachments are base64 payloads from the UI (fileName/mediaType/data).
+     * Each CLI provider materialises them appropriately (Grok ACP image blocks,
+     * OpenCode {@code -f}, Kimi ReadMediaFile path injection, etc.).
+     */
+    public CompletableFuture<SDKResult> sendMessage(
+            String channelId,
+            String message,
+            String sessionId,
+            String cwd,
+            String model,
+            String reasoningEffort,
+            List<ClaudeSession.Attachment> attachments,
+            MessageCallback callback
+    ) {
+        return sendMessage(channelId, message, sessionId, cwd, model, reasoningEffort, attachments, null, callback);
+    }
+
+    /**
+     * Send a message with optional attachments and permission mode.
+     *
+     * <p>{@code permissionMode} is required for Grok ACP auto-approve
+     * ({@code bypassPermissions} / full-auto). Without it the Node side
+     * defaults to {@code default} and every tool/edit still pops the dialog.
+     */
+    public CompletableFuture<SDKResult> sendMessage(
+            String channelId,
+            String message,
+            String sessionId,
+            String cwd,
+            String model,
+            String reasoningEffort,
+            List<ClaudeSession.Attachment> attachments,
+            String permissionMode,
+            MessageCallback callback
+    ) {
         JsonObject stdinInput = new JsonObject();
         stdinInput.addProperty("message", message != null ? message : "");
         stdinInput.addProperty("sessionId", sessionId != null ? sessionId : "");
         stdinInput.addProperty("cwd", cwd != null ? cwd : "");
         stdinInput.addProperty("model", model != null ? model : "");
         stdinInput.addProperty("reasoningEffort", reasoningEffort != null ? reasoningEffort : "");
+        // Always send permissionMode (even "default") so Grok/other CLIs never
+        // fall back to an implicit default that ignores the UI mode selection.
+        String mode = permissionMode != null && !permissionMode.isBlank() ? permissionMode.trim() : "default";
+        stdinInput.addProperty("permissionMode", mode);
+        if (attachments != null && !attachments.isEmpty()) {
+            stdinInput.add("attachments", buildAttachmentArray(attachments));
+        }
 
         String stdinJson = gson.toJson(stdinInput);
         List<String> command = buildBaseCommand("send");
@@ -168,10 +218,28 @@ public abstract class MarkerCliBridge extends BaseSDKBridge {
             return CompletableFuture.completedFuture(error);
         }
 
+        int attachmentCount = attachments != null ? attachments.size() : 0;
         LOG.info("[" + getProviderName() + "] send sessionId="
                 + (sessionId != null && !sessionId.isEmpty() ? sessionId : "(new)")
-                + " model=" + (model != null && !model.isEmpty() ? model : "(default)"));
+                + " model=" + (model != null && !model.isEmpty() ? model : "(default)")
+                + " permissionMode=" + mode
+                + " attachments=" + attachmentCount);
 
         return executeStreamingCommand(channelId, command, stdinJson, cwd, callback);
+    }
+
+    private JsonArray buildAttachmentArray(List<ClaudeSession.Attachment> attachments) {
+        JsonArray attArr = new JsonArray();
+        for (ClaudeSession.Attachment attachment : attachments) {
+            if (attachment == null) {
+                continue;
+            }
+            JsonObject o = new JsonObject();
+            o.addProperty("fileName", attachment.fileName != null ? attachment.fileName : "");
+            o.addProperty("mediaType", attachment.mediaType != null ? attachment.mediaType : "");
+            o.addProperty("data", attachment.data != null ? attachment.data : "");
+            attArr.add(o);
+        }
+        return attArr;
     }
 }

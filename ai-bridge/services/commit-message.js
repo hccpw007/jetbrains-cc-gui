@@ -1,15 +1,14 @@
 /**
  * Commit Message Generation Service — "provider ask" mode.
  *
- * Calls the active provider's API directly via the lightweight Anthropic SDK
- * (client.messages.stream), NOT the Claude Agent SDK / daemon. This gives:
- *   - real token streaming (native SSE via .on('text')),
- *   - fast startup (no heavy Agent SDK load),
- *   - no session/history (a stateless one-shot messages.create).
+ * Routes to:
+ *   - Claude: Anthropic SDK messages.stream (stateless)
+ *   - Codex:  Codex SDK one-shot thread
+ *   - Grok / Kimi / OpenCode / PI: headless CLI ask (session-less)
  *
  * stdin JSON: { prompt, provider, model }
  *   - prompt:   the full commit prompt (spec + git diff), assembled by Java
- *   - provider: 'claude' | 'codex'
+ *   - provider: 'claude' | 'codex' | 'grok' | 'kimi' | 'opencode' | 'pi'
  *   - model:    resolved model id (mapped to the real provider model at runtime)
  *
  * stdout markers:
@@ -26,6 +25,7 @@ import { resolveModelFromSettings } from '../utils/model-utils.js';
 import { getRealHomeDir } from '../utils/path-utils.js';
 import { ensureAnthropicSdk } from './claude/message-utils.js';
 import { buildCodexCliEnvironment } from './codex/codex-utils.js';
+import { askCliProvider, isCliAskProvider } from './cli-ask.js';
 
 let codexSdk = null;
 
@@ -179,6 +179,32 @@ async function generateWithCodex(prompt, model) {
   throw new Error('Codex commit response is empty');
 }
 
+function emitContentDelta(text) {
+  if (typeof text !== 'string' || !text) return;
+  process.stdout.write(`[CONTENT_DELTA] ${JSON.stringify(text)}\n`);
+}
+
+/**
+ * Headless CLI path (Grok / Kimi / OpenCode / PI) — session-less ask.
+ */
+async function generateWithCli(provider, prompt, model) {
+  const fullPrompt = [
+    prompt,
+    '',
+    'Remember: output only the commit message, wrapped in <commit></commit>, with no explanation. Do not run tools.',
+  ].join('\n');
+
+  console.log(`[CommitMessage] CLI ask provider=${provider}, model=${model || '(default)'}`);
+
+  return askCliProvider({
+    provider,
+    prompt: fullPrompt,
+    model,
+    cwd: getRealHomeDir(),
+    onDelta: emitContentDelta,
+  });
+}
+
 async function main() {
   try {
     const input = await readStdin();
@@ -192,9 +218,14 @@ async function main() {
 
     console.log(`[CommitMessage] provider=${provider}, model=${model || '(default)'}`);
 
-    const text = (provider === 'codex')
-      ? await generateWithCodex(prompt, model)
-      : await generateWithClaude(prompt, model);
+    let text;
+    if (provider === 'codex') {
+      text = await generateWithCodex(prompt, model);
+    } else if (isCliAskProvider(provider)) {
+      text = await generateWithCli(provider, prompt, model);
+    } else {
+      text = await generateWithClaude(prompt, model);
+    }
 
     const encoded = text.replace(/\n/g, '{{NEWLINE}}');
     console.log(`[COMMIT]${encoded}`);

@@ -26,7 +26,14 @@ import {
   CONTEXT_COMMANDS,
 } from './hooks/useMessageSender';
 import { applyDiffTheme, getStoredDiffTheme } from './utils/diffTheme';
+import { collectTaskEventsFromMessages } from './utils/taskNotificationMessage';
+import type { ClaudeMessage } from './types';
 import type { Attachment, ChatInputBoxHandle } from './components/ChatInputBox/types';
+import {
+  apply1MContextSuffix,
+  normalizeClaudeModelId,
+  strip1MContextSuffix,
+} from './components/ChatInputBox/types';
 import { ToastContainer } from './components/Toast';
 import { ChatHeader } from './components/ChatHeader';
 import { ChatScreen } from './components/ChatScreen';
@@ -256,6 +263,35 @@ const App = () => {
     if (currentView === 'chat') { forceRefreshPrompts(); }
   }, [currentView]);
 
+  // Recover task events from task-notification user messages. Recent Claude Code
+  // delivers a background agent's terminal report as a plain user message (XML
+  // in content) instead of an SDK task_notification event, so history replay —
+  // and any live session that never fired the SDK path — would otherwise leave
+  // the subagent card stuck on the launch ack text. Derived entries only fill
+  // gaps: a real SDK event already in the map is kept as-is.
+  // Messages update immutably, so unchanged messages keep their object identity;
+  // tracking scanned objects avoids re-scanning the whole conversation on every
+  // streaming chunk.
+  const scannedTaskNotificationMessagesRef = useRef(new WeakSet<ClaudeMessage>());
+  useEffect(() => {
+    const scanned = scannedTaskNotificationMessagesRef.current;
+    const fresh = messages.filter((m) => !scanned.has(m));
+    if (fresh.length === 0) return;
+    for (const m of fresh) scanned.add(m);
+    const derived = collectTaskEventsFromMessages(fresh);
+    if (Object.keys(derived).length === 0) return;
+    setTaskEvents((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const [id, event] of Object.entries(derived)) {
+        if (next[id]) continue;
+        next[id] = event;
+        changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [messages, setTaskEvents]);
+
   // ── Session management ──
   const {
     showNewSessionConfirm, showInterruptConfirm,
@@ -298,7 +334,12 @@ const App = () => {
           setSelectedPiModel(model);
           sendBridgeEvent('set_model', model);
         } else {
-          handleModelSelect(model);
+          // claude (or unrecognized): apply the claude model directly —
+          // handleModelSelect reads currentProvider from a stale closure
+          // right after a provider switch.
+          const normalized = normalizeClaudeModelId(strip1MContextSuffix(model));
+          setSelectedClaudeModel(normalized);
+          sendBridgeEvent('set_model', apply1MContextSuffix(normalized, longContextEnabled));
         }
       }
       if (agent && provider === 'claude') {

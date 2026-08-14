@@ -7,6 +7,7 @@ import com.github.claudecodegui.notifications.ClaudeNotifier;
 import com.github.claudecodegui.provider.claude.ClaudeSDKBridge;
 import com.github.claudecodegui.provider.codex.CodexSDKBridge;
 import com.github.claudecodegui.provider.common.MarkerCliBridge;
+import com.github.claudecodegui.provider.common.MessageCallback;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.intellij.openapi.diagnostic.Logger;
@@ -142,19 +143,16 @@ public class SessionSendService {
         }
 
         if (cliBridges.containsKey(currentProvider)) {
-            if (attachments != null && !attachments.isEmpty()) {
-                LOG.warn("[CliProvider] Dropping " + attachments.size()
-                        + " attachment(s): CLI providers do not support attachments (provider="
-                        + currentProvider + ")");
-            }
             return sendToCliProvider(
                     currentProvider,
                     channelId,
                     input,
+                    attachments,
                     openedFilesJson,
                     agentPrompt,
                     fileTagPaths,
-                    normalizedRequestedEffort
+                    normalizedRequestedEffort,
+                    effectivePermissionMode
             );
         }
 
@@ -309,20 +307,23 @@ public class SessionSendService {
             String provider,
             String channelId,
             String input,
+            List<ClaudeSession.Attachment> attachments,
             JsonObject openedFilesJson,
             String agentPrompt,
             List<String> fileTagPaths,
-            String requestedReasoningEffort
+            String requestedReasoningEffort,
+            String permissionMode
     ) {
         MarkerCliBridge bridge = cliBridges.get(provider);
         if (bridge == null) {
-            CodexMessageHandler handler = new CodexMessageHandler(state, callbackFacade.getCallbackHandler());
-            handler.onError("CLI provider not registered: " + provider);
+            MessageCallback missingHandler = createCliMessageHandler(provider);
+            missingHandler.onError("CLI provider not registered: " + provider);
             return CompletableFuture.completedFuture(null);
         }
 
-        // CLI providers reuse Codex streaming marker handling (content/thinking/session_id/tools).
-        CodexMessageHandler handler = new CodexMessageHandler(state, callbackFacade.getCallbackHandler());
+        // Grok has a dedicated handler (multi-turn assistant ownership + no user-echo
+        // dupes). Other CLI providers reuse Codex streaming marker handling.
+        MessageCallback handler = createCliMessageHandler(provider);
 
         String contextAppend = contextService.buildCodexContextAppend(openedFilesJson, fileTagPaths);
         String finalInput = (input != null ? input : "") + contextAppend;
@@ -336,13 +337,19 @@ public class SessionSendService {
                 requestedReasoningEffort != null ? requestedReasoningEffort : state.getReasoningEffort()
         );
         String modelForCli = normalizeCliModelForProvider(provider, state.getModel());
+        String effectiveMode = permissionMode != null && !permissionMode.isBlank()
+                ? permissionMode
+                : "default";
+        int attachmentCount = attachments != null ? attachments.size() : 0;
 
         LOG.info("[Lifecycle] sendToCli provider=" + provider
                 + " sessionId=" + (state.getSessionId() != null ? state.getSessionId() : "(new)")
                 + ", cwd=" + state.getCwd()
                 + ", modelRaw=" + state.getModel()
                 + ", modelCli=" + (modelForCli != null ? modelForCli : "(config-default)")
-                + ", effort=" + effort);
+                + ", effort=" + effort
+                + ", permissionMode=" + effectiveMode
+                + ", attachments=" + attachmentCount);
 
         return bridge.sendMessage(
                 channelId,
@@ -351,8 +358,23 @@ public class SessionSendService {
                 state.getCwd(),
                 modelForCli != null ? modelForCli : "",
                 effort,
+                attachments,
+                effectiveMode,
                 handler
         ).thenApply(result -> null);
+    }
+
+    /**
+     * Build the marker-stream callback for a CLI provider.
+     * Grok uses {@link GrokMessageHandler} so each stream owns a dedicated assistant
+     * bubble and ACP user echoes never re-append the send-time user message.
+     */
+    MessageCallback createCliMessageHandler(String provider) {
+        CallbackHandler callbacks = callbackFacade.getCallbackHandler();
+        if ("grok".equals(provider)) {
+            return new GrokMessageHandler(state, callbacks);
+        }
+        return new CodexMessageHandler(state, callbacks);
     }
 
     static String normalizeCliReasoningEffort(String effort) {
@@ -397,10 +419,10 @@ public class SessionSendService {
             return null;
         }
         if ("grok".equals(provider)) {
-            // Legacy UI stored upstream API id "grok-4.5"; CLI needs profile name "grok".
-            if ("grok-4.5".equals(lower) || "grok-4".equals(lower) || "grok-4.5-build".equals(lower)) {
-                LOG.info("[Grok] Remapping upstream model id '" + trimmed + "' to config profile 'grok'");
-                return "grok";
+            if ("grok".equals(lower) || "default".equals(lower) || "(default)".equals(lower)
+                    || "grok-4.5".equals(lower)) {
+                LOG.info("[Grok] Normalizing sentinel model id '" + trimmed + "' to default model 'grok-4.6'");
+                return "grok-4.6";
             }
         }
         return trimmed;

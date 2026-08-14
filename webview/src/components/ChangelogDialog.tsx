@@ -10,14 +10,28 @@ interface ChangelogDialogProps {
 }
 
 /**
- * Resolve content to display. Shows both EN and ZH when both exist,
- * otherwise shows whichever is available.
+ * Whether the UI language should prefer Chinese changelog content first.
+ * Covers simplified (`zh`) and traditional (`zh-TW`) locales.
  */
-function resolveContent(entry: ChangelogEntry): string[] {
+function prefersChineseChangelog(language: string | undefined): boolean {
+  if (!language) return false;
+  return language === 'zh' || language === 'zh-TW' || language.startsWith('zh-') || language.startsWith('zh_');
+}
+
+/**
+ * Resolve content to display. Shows both EN and ZH when both exist,
+ * ordered by the active UI language (Chinese first for zh / zh-TW).
+ */
+function resolveContent(entry: ChangelogEntry, language?: string): string[] {
   const { en, zh } = entry.content;
   const parts: string[] = [];
-  if (en) parts.push(en);
-  if (zh) parts.push(zh);
+  if (prefersChineseChangelog(language)) {
+    if (zh) parts.push(zh);
+    if (en) parts.push(en);
+  } else {
+    if (en) parts.push(en);
+    if (zh) parts.push(zh);
+  }
   return parts;
 }
 
@@ -113,7 +127,7 @@ function escapeHtml(text: string): string {
 }
 
 const ChangelogDialog = ({ isOpen, onClose, entries, initialPage = 0 }: ChangelogDialogProps) => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [currentPage, setCurrentPage] = useState(initialPage);
 
   // Reset page when dialog opens
@@ -152,7 +166,7 @@ const ChangelogDialog = ({ isOpen, onClose, entries, initialPage = 0 }: Changelo
   if (!isOpen || entries.length === 0) return null;
 
   const entry = entries[currentPage];
-  const contentParts = resolveContent(entry);
+  const contentParts = resolveContent(entry, i18n.language);
   const totalPages = entries.length;
   const hasPrev = currentPage > 0;
   const hasNext = currentPage < totalPages - 1;
