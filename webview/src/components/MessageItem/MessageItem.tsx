@@ -221,14 +221,16 @@ function formatCacheHitRatio(tokenInfo: TokenUsageInfo): string | null {
   return `${Math.min(100, Math.max(0, ratio)).toFixed(2)}%`;
 }
 
-/** 格式化输出 token 生成速度（tokens/s）：输出 token 数 ÷ 耗时秒数。
- *  用精确 durationMs 与 outputTokens 计算，避免四舍五入污染速度值；
- *  durationMs 或输出 token 非正时返回 null（不显示，如无耗时的历史回放）。 */
+/** 格式化输出 token 生成速度（tokens/s）：输出 token 数 ÷ 耗时秒数，取整数。
+ *  用精确 durationMs 与 outputTokens 计算，避免四舍五入前的近似污染速度值；
+ *  durationMs 或输出 token 非正时返回 null（不显示，如无耗时的历史回放）；
+ *  速度不足 1 token/s 时显示 "<1tokens/s" 下限，避免 "0tokens/s" 误导（实际有输出）。 */
 function formatTokenSpeed(durationMs: number, outputTokens: number): string | null {
   if (durationMs <= 0 || outputTokens <= 0) return null;
   const seconds = durationMs / 1000;
-  const speed = outputTokens / seconds;
-  return `${speed.toFixed(1)}tokens/s`;
+  const rounded = Math.round(outputTokens / seconds);
+  if (rounded <= 0) return '<1tokens/s';
+  return `${rounded}tokens/s`;
 }
 
 function isToolBlockOfType(block: ClaudeContentBlock, toolNames: Set<string>): boolean {
