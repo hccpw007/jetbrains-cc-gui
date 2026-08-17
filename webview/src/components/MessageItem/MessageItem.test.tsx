@@ -186,6 +186,8 @@ describe('MessageItem token usage display', () => {
 
     expect(screen.getByText('0:16')).toBeTruthy();
     expect(screen.getByText('输入 1.2K / 输出 456')).toBeTruthy();
+    // 速度始终显示：456 输出 token ÷ 16s = 28.5tokens/s
+    expect(screen.getByText('28.5tokens/s')).toBeTruthy();
     expect(screen.queryByText(/\$0\.0060/)).toBeNull();
   });
 
@@ -210,6 +212,8 @@ describe('MessageItem token usage display', () => {
 
     expect(screen.getByText('0:16')).toBeTruthy();
     expect(screen.getByText('输入 1.2K / 输出 456')).toBeTruthy();
+    // 详细输出下速度与费用共存于第一行
+    expect(screen.getByText('28.5tokens/s')).toBeTruthy();
     expect(screen.getByText('$0.0060')).toBeTruthy();
   });
 
@@ -263,6 +267,8 @@ describe('MessageItem token usage display', () => {
     renderMessageItem(message);
 
     expect(screen.getByText('输入 36.3K / 输出 353')).toBeTruthy();
+    // 非 detailed 也显示速度：353 输出 token ÷ 10s = 35.3tokens/s
+    expect(screen.getByText('35.3tokens/s')).toBeTruthy();
     expect(screen.queryByText(/缓存命中/)).toBeNull();
   });
 
@@ -312,6 +318,8 @@ describe('MessageItem token usage display', () => {
 
     expect(screen.getByText('0:03')).toBeTruthy();
     expect(screen.queryByText(/输入/)).toBeNull();
+    // 无 turnUsage 时不显示生成速度
+    expect(screen.queryByText(/tokens\/s/)).toBeNull();
   });
 
   it('does not show token usage when tokens are all zero', () => {
@@ -334,5 +342,7 @@ describe('MessageItem token usage display', () => {
 
     expect(screen.getByText('0:03')).toBeTruthy();
     expect(screen.queryByText(/输入/)).toBeNull();
+    // 输出 token 为 0 时不显示生成速度
+    expect(screen.queryByText(/tokens\/s/)).toBeNull();
   });
 });

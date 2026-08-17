@@ -221,6 +221,16 @@ function formatCacheHitRatio(tokenInfo: TokenUsageInfo): string | null {
   return `${Math.min(100, Math.max(0, ratio)).toFixed(2)}%`;
 }
 
+/** 格式化输出 token 生成速度（tokens/s）：输出 token 数 ÷ 耗时秒数。
+ *  用精确 durationMs 与 outputTokens 计算，避免四舍五入污染速度值；
+ *  durationMs 或输出 token 非正时返回 null（不显示，如无耗时的历史回放）。 */
+function formatTokenSpeed(durationMs: number, outputTokens: number): string | null {
+  if (durationMs <= 0 || outputTokens <= 0) return null;
+  const seconds = durationMs / 1000;
+  const speed = outputTokens / seconds;
+  return `${speed.toFixed(1)}tokens/s`;
+}
+
 function isToolBlockOfType(block: ClaudeContentBlock, toolNames: Set<string>): boolean {
   return block.type === 'tool_use' && isToolName(block.name, toolNames);
 }
@@ -840,12 +850,14 @@ export const MessageItem = memo(function MessageItem({
         {renderGroupedBlocks()}
       </div>
 
-      {/* Duration and token display after last assistant message — first row shows
-          elapsed time plus turn cost (detailed output), second row shows token usage */}
+      {/* 最后一条 assistant 消息后的耗时与 token 展示 — 第一行显示耗时、输出 token 生成速度，
+          详细输出时附带本轮费用；第二行显示 token 用量 */}
       {message.type === 'assistant' && !isMessageStreaming && typeof message.durationMs === 'number' && (
         (() => {
           const tokenInfo = extractTokenUsage(message.raw);
           const cacheHitRatio = tokenInfo && detailedOutputEnabled ? formatCacheHitRatio(tokenInfo) : null;
+          // 输出 token 生成速度始终显示（只要有耗时与输出 token），与耗时/用量一致
+          const tokenSpeed = tokenInfo ? formatTokenSpeed(message.durationMs, tokenInfo.outputTokens) : null;
           const cacheHitLabel =
             cacheHitRatio && tokenInfo
               ? t('chat.cacheHitsWithRatio', {
@@ -856,11 +868,17 @@ export const MessageItem = memo(function MessageItem({
           return (
             <div className="message-duration">
               <div className="message-duration-inner">
-                {/* First row: elapsed time, plus turn cost when detailed output is enabled */}
+                {/* 第一行：本次耗时、输出 token 生成速度，详细输出时附带本轮费用 */}
                 <div className="message-duration-row">
                   <span className="message-duration-flag codicon codicon-clock"></span>
                   <span className="message-duration-cost">{t('chat.totalDuration')}</span>
                   <span className="message-duration-value">{formatDurationMs(message.durationMs)}</span>
+                  {tokenSpeed && (
+                    <>
+                      <span className="message-duration-separator">·</span>
+                      <span className="message-duration-tokens">{tokenSpeed}</span>
+                    </>
+                  )}
                   {detailedOutputEnabled && tokenInfo && tokenInfo.costUsd !== undefined && (
                     <>
                       <span className="message-duration-separator">·</span>
