@@ -235,7 +235,7 @@ describe('MessageItem token usage display', () => {
 
     // Input shows the full input side (37 + 0 + 36310 = 36347 → "36.3K"),
     // so heavy cache reads are never hidden from the user.
-    const tokens = screen.getByText('输入 36.3K（缓存命中 36.3K，100%） / 输出 353');
+    const tokens = screen.getByText('输入 36.3K（缓存命中 36.3K，99.90%） / 输出 353');
     expect(tokens).toBeTruthy();
     expect(tokens.getAttribute('title')).toBe(
       '本轮合计 — 输入 37 · 缓存写入 0 · 缓存读取 36.3K · 输出 353'

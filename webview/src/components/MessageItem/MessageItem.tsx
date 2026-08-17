@@ -216,8 +216,9 @@ function formatUsdCost(cost: number): string {
 
 function formatCacheHitRatio(tokenInfo: TokenUsageInfo): string | null {
   if (tokenInfo.cacheReadTokens <= 0 || tokenInfo.inputTokens <= 0) return null;
-  const ratio = Math.round((tokenInfo.cacheReadTokens / tokenInfo.inputTokens) * 100);
-  return `${Math.min(100, Math.max(0, ratio))}%`;
+  // 用精确 token 数字计算，避免 "32.3K" 这类四舍五入值污染命中率
+  const ratio = (tokenInfo.cacheReadTokens / tokenInfo.inputTokens) * 100;
+  return `${Math.min(100, Math.max(0, ratio)).toFixed(2)}%`;
 }
 
 function isToolBlockOfType(block: ClaudeContentBlock, toolNames: Set<string>): boolean {
