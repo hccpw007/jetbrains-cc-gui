@@ -40,6 +40,8 @@ interface ContextBarProps {
   autoOpenFileEnabled?: boolean;
   /** Callback to enable file context (called from placeholder click) */
   onRequestEnableFileContext?: () => void;
+  /** Insert a trigger symbol (/ @ !) at the cursor and open the matching dropdown */
+  onTriggerInsert?: (trigger: '/' | '@' | '!') => void;
 }
 
 export const ContextBar: React.FC<ContextBarProps> = memo(({
@@ -60,6 +62,7 @@ export const ContextBar: React.FC<ContextBarProps> = memo(({
   onToggleStatusPanel,
   autoOpenFileEnabled = false,
   onRequestEnableFileContext,
+  onTriggerInsert,
 }) => {
   const { t } = useTranslation();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -265,6 +268,37 @@ export const ContextBar: React.FC<ContextBarProps> = memo(({
 
       {/* Right side tools - StatusPanel toggle and Rewind button */}
       <div className="context-tools-right">
+        {/* Trigger symbol buttons - insert / @ ! at cursor to open matching dropdown */}
+        {onTriggerInsert && (
+          <>
+            <button
+              className="context-tool-btn has-tooltip trigger-symbol-btn"
+              onClick={() => onTriggerInsert('/')}
+              aria-label={t('chat.triggerSlashCommand')}
+              data-tooltip={t('chat.triggerSlashCommand')}
+            >
+              <span className="trigger-symbol">/</span>
+            </button>
+            <button
+              className="context-tool-btn has-tooltip trigger-symbol-btn"
+              onClick={() => onTriggerInsert('@')}
+              aria-label={t('chat.triggerReferenceFile')}
+              data-tooltip={t('chat.triggerReferenceFile')}
+            >
+              <span className="trigger-symbol">@</span>
+            </button>
+            <button
+              className="context-tool-btn has-tooltip trigger-symbol-btn"
+              onClick={() => onTriggerInsert('!')}
+              aria-label={t('chat.triggerInsertPrompt')}
+              data-tooltip={t('chat.triggerInsertPrompt')}
+            >
+              <span className="trigger-symbol">!</span>
+            </button>
+            <div className="context-tool-divider" />
+          </>
+        )}
+
         {/* StatusPanel expand/collapse toggle - always visible */}
         {onToggleStatusPanel && (
           <button
