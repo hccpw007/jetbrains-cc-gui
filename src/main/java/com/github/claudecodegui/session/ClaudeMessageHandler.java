@@ -618,14 +618,16 @@ public class ClaudeMessageHandler implements MessageCallback {
      * <p>The chat UI selects Claude slot IDs (e.g. {@code claude-sonnet-4-6[1m]}), which the
      * active provider's env maps to real model IDs (e.g. {@code deepseek-v4-flash}) before the
      * request reaches the API. Pricing must use the real ID — otherwise a custom price configured
-     * for the mapped model is never matched and the turn is billed at built-in Claude rates
-     * (same resolution used for the context limit at {@link ModelProviderHandler}).
+     * for the mapped model is never matched and the turn is billed at built-in Claude rates.
+     * Resolution prefers the {@code *_MODEL_NAME} entry (real routed model), falling back to the
+     * {@code *_MODEL} slot mapping, so local settings written by proxies (cc-switch) that keep the
+     * slot id in {@code *_MODEL} still bill at the custom real-model rate.
      */
     private String resolvePricingModel(String model) {
         try {
             JsonObject claudeSettings = settingsService.readClaudeSettings();
             if (claudeSettings != null && claudeSettings.has("env") && claudeSettings.get("env").isJsonObject()) {
-                return ModelProviderHandler.resolveConfiguredClaudeModel(model, claudeSettings.getAsJsonObject("env"));
+                return ModelProviderHandler.resolveConfiguredClaudeModelForPricing(model, claudeSettings.getAsJsonObject("env"));
             }
         } catch (Exception e) {
             LOG.warn("Failed to resolve pricing model: " + e.getMessage());

@@ -217,8 +217,21 @@ function formatUsdCost(cost: number): string {
 
 function formatCacheHitRatio(tokenInfo: TokenUsageInfo): string | null {
   if (tokenInfo.cacheReadTokens <= 0 || tokenInfo.inputTokens <= 0) return null;
-  const ratio = Math.round((tokenInfo.cacheReadTokens / tokenInfo.inputTokens) * 100);
-  return `${Math.min(100, Math.max(0, ratio))}%`;
+  // 用精确 token 数字计算，避免 "32.3K" 这类四舍五入值污染命中率
+  const ratio = (tokenInfo.cacheReadTokens / tokenInfo.inputTokens) * 100;
+  return `${Math.min(100, Math.max(0, ratio)).toFixed(2)}%`;
+}
+
+/** 格式化输出 token 生成速度（tokens/s）：输出 token 数 ÷ 耗时秒数，取整数。
+ *  用精确 durationMs 与 outputTokens 计算，避免四舍五入前的近似污染速度值；
+ *  durationMs 或输出 token 非正时返回 null（不显示，如无耗时的历史回放）；
+ *  速度不足 1 token/s 时显示 "<1tokens/s" 下限，避免 "0tokens/s" 误导（实际有输出）。 */
+function formatTokenSpeed(durationMs: number, outputTokens: number): string | null {
+  if (durationMs <= 0 || outputTokens <= 0) return null;
+  const seconds = durationMs / 1000;
+  const rounded = Math.round(outputTokens / seconds);
+  if (rounded <= 0) return '<1tokens/s';
+  return `${rounded}tokens/s`;
 }
 
 function isToolBlockOfType(block: ClaudeContentBlock, toolNames: Set<string>): boolean {
@@ -839,51 +852,65 @@ export const MessageItem = memo(function MessageItem({
         {renderGroupedBlocks()}
       </div>
 
-      {/* Duration and token display after last assistant message */}
+      {/* 最后一条 assistant 消息后的耗时与 token 展示 — 第一行显示耗时、输出 token 生成速度，
+          详细输出时附带本轮费用；第二行显示 token 用量 */}
       {message.type === 'assistant' && !isMessageStreaming && typeof message.durationMs === 'number' && (
-        <div className="message-duration">
-          <span className="message-duration-inner">
-            <span className="message-duration-flag codicon codicon-clock"></span>
-            <span className="message-duration-cost">{t('chat.totalDuration')}</span>
-            <span className="message-duration-value">{formatDurationMs(message.durationMs)}</span>
-            {(() => {
-              const tokenInfo = extractTokenUsage(message.raw);
-              if (!tokenInfo) return null;
-              const cacheHitRatio = detailedOutputEnabled ? formatCacheHitRatio(tokenInfo) : null;
-              const cacheHitLabel = cacheHitRatio
-                ? t('chat.cacheHitsWithRatio', {
-                  tokens: formatTokenCount(tokenInfo.cacheReadTokens),
-                  ratio: cacheHitRatio,
-                })
-                : '';
-              return (
-                <>
-                  <span className="message-duration-separator">·</span>
-                  <span
-                    className="message-duration-tokens"
-                    title={t('chat.tokenUsageDetail', {
-                      input: formatTokenCount(tokenInfo.nonCacheInputTokens),
-                      cacheWrite: formatTokenCount(tokenInfo.cacheCreationTokens),
-                      cacheRead: formatTokenCount(tokenInfo.cacheReadTokens),
-                      output: formatTokenCount(tokenInfo.outputTokens),
-                    })}
-                  >
-                    {t('chat.tokenUsage', {
-                      input: `${formatTokenCount(tokenInfo.inputTokens)}${cacheHitLabel}`,
-                      output: formatTokenCount(tokenInfo.outputTokens),
-                    })}
-                  </span>
-                  {detailedOutputEnabled && tokenInfo.costUsd !== undefined && (
+        (() => {
+          const tokenInfo = extractTokenUsage(message.raw);
+          const cacheHitRatio = tokenInfo && detailedOutputEnabled ? formatCacheHitRatio(tokenInfo) : null;
+          // 输出 token 生成速度始终显示（只要有耗时与输出 token），与耗时/用量一致
+          const tokenSpeed = tokenInfo ? formatTokenSpeed(message.durationMs, tokenInfo.outputTokens) : null;
+          const cacheHitLabel =
+            cacheHitRatio && tokenInfo
+              ? t('chat.cacheHitsWithRatio', {
+                tokens: formatTokenCount(tokenInfo.cacheReadTokens),
+                ratio: cacheHitRatio,
+              })
+              : '';
+          return (
+            <div className="message-duration">
+              <div className="message-duration-inner">
+                {/* 第一行：本次耗时、输出 token 生成速度，详细输出时附带本轮费用 */}
+                <div className="message-duration-row">
+                  <span className="message-duration-flag codicon codicon-clock"></span>
+                  <span className="message-duration-cost">{t('chat.totalDuration')}</span>
+                  <span className="message-duration-value">{formatDurationMs(message.durationMs)}</span>
+                  {tokenSpeed && (
+                    <>
+                      <span className="message-duration-separator">·</span>
+                      <span className="message-duration-tokens">{tokenSpeed}</span>
+                    </>
+                  )}
+                  {detailedOutputEnabled && tokenInfo && tokenInfo.costUsd !== undefined && (
                     <>
                       <span className="message-duration-separator">·</span>
                       <span className="message-duration-tokens">{formatUsdCost(tokenInfo.costUsd)}</span>
                     </>
                   )}
-                </>
-              );
-            })()}
-          </span>
-        </div>
+                </div>
+                {/* Second row: whole-turn token usage (input incl. cache hits, output) */}
+                {tokenInfo && (
+                  <div className="message-duration-row">
+                    <span
+                      className="message-duration-tokens"
+                      title={t('chat.tokenUsageDetail', {
+                        input: formatTokenCount(tokenInfo.nonCacheInputTokens),
+                        cacheWrite: formatTokenCount(tokenInfo.cacheCreationTokens),
+                        cacheRead: formatTokenCount(tokenInfo.cacheReadTokens),
+                        output: formatTokenCount(tokenInfo.outputTokens),
+                      })}
+                    >
+                      {t('chat.tokenUsage', {
+                        input: `${formatTokenCount(tokenInfo.inputTokens)}${cacheHitLabel}`,
+                        output: formatTokenCount(tokenInfo.outputTokens),
+                      })}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })()
       )}
     </div>
   );

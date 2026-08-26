@@ -157,7 +157,7 @@ export const ReasoningSelect = ({ value, onChange, disabled, selectedModel, curr
     <div style={RELATIVE_INLINE_BLOCK_STYLE}>
       <button
         ref={buttonRef}
-        className="selector-button"
+        className="selector-button selector-text-first"
         onClick={handleToggle}
         disabled={disabled}
         title={t('reasoning.title', { defaultValue: 'Select reasoning depth' })}

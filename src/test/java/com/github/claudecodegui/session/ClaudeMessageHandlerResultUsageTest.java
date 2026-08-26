@@ -133,6 +133,44 @@ public class ClaudeMessageHandlerResultUsageTest {
         }
     }
 
+    /**
+     * cc-switch local settings keep the Claude slot id in {@code *_MODEL} and the real routed
+     * model in {@code *_MODEL_NAME}. Pricing must prefer the latter so custom rates keyed by the
+     * real model (deepseek-v4-flash) match instead of falling back to the built-in sonnet rate.
+     */
+    @Test
+    public void billsWithRealModelNameWhenSlotIdIsKeptInModelEnv() throws Exception {
+        Path config = Files.createTempFile("pricing-name-test", ".json");
+        Files.writeString(config, "{\"customModelPricing\":{\"claude\":{\"deepseek-v4-flash\":{"
+                + "\"inputCostPer1M\":1.0,\"outputCostPer1M\":2.0,\"cacheReadCostPer1M\":0.02}}}}");
+        CustomPricingProvider.setInstanceForTests(CustomPricingProvider.createForTests(config));
+        try {
+            handler = new ClaudeMessageHandler(
+                    null,
+                    state,
+                    new CallbackHandler(),
+                    new MessageParser(),
+                    new MessageMerger(),
+                    new GsonBuilder().create(),
+                    fakeSettings("{\"env\":{"
+                            + "\"ANTHROPIC_DEFAULT_SONNET_MODEL\":\"claude-sonnet-4-6[1m]\","
+                            + "\"ANTHROPIC_DEFAULT_SONNET_MODEL_NAME\":\"deepseek-v4-flash\"}}")
+            );
+
+            Message msg = newAssistantMessageWithUsage(37, 353);
+            setCurrentAssistantMessage(msg);
+            invokeHandleResult("{\"type\":\"result\",\"subtype\":\"success\",\"usage\":{"
+                    + "\"input_tokens\":1200,\"cache_creation_input_tokens\":4096,"
+                    + "\"cache_read_input_tokens\":363100,\"output_tokens\":4560}}");
+
+            // Billed at the deepseek rate via *_MODEL_NAME, not the built-in sonnet rate.
+            assertEquals(0.017582, msg.raw.get("turnCostUsd").getAsDouble(), 0.000001);
+        } finally {
+            CustomPricingProvider.setInstanceForTests(null);
+            Files.deleteIfExists(config);
+        }
+    }
+
     @Test
     public void resultPushesMessageUpdateAfterStampingTurnUsage() throws Exception {
         Message msg = newAssistantMessageWithUsage(37, 353);

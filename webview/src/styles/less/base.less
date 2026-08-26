@@ -26,6 +26,16 @@
     --idea-editor-line-spacing: 1.5;
 }
 
+/* 禁用 macOS 触控板双指左右滑动触发的浏览器历史前进/后退（swipe navigation）：
+ * JCEF 默认允许该手势，而本应用是单页应用，历史导航会导致页面跳转甚至空白。
+ * Chromium 的 overscroll 历史导航尊重根元素的 overscroll-behavior，设 none 后
+ * 横向滑动到边界不再触发前进/后退。html/body 同时设置是因为 root scroller 的
+ * overscroll-behavior 优先取 html 计算值，未设置时回落到 body。 */
+html,
+body {
+    overscroll-behavior: none;
+}
+
 body {
     font-family: var(--cc-gui-ui-font-family, 'Inter', system-ui, sans-serif);
     background: var(--bg-chat);

@@ -38,6 +38,7 @@ export function ChatInputBoxHeader({
   onDismissOpenSourceBanner,
   autoOpenFileEnabled,
   onRequestEnableFileContext,
+  onTriggerInsert,
 }: {
   sdkInstalled: boolean;
   sdkStatusLoading: boolean;
@@ -68,6 +69,8 @@ export function ChatInputBoxHeader({
   onDismissOpenSourceBanner?: () => void;
   autoOpenFileEnabled?: boolean;
   onRequestEnableFileContext?: () => void;
+  /** Insert a trigger symbol (/ @ !) at the cursor and open the matching dropdown */
+  onTriggerInsert?: (trigger: '/' | '@' | '!') => void;
 }) {
   const { addToast } = useUIState();
 
@@ -183,6 +186,7 @@ export function ChatInputBoxHeader({
         onToggleStatusPanel={onToggleStatusPanel}
         autoOpenFileEnabled={autoOpenFileEnabled}
         onRequestEnableFileContext={onRequestEnableFileContext}
+        onTriggerInsert={onTriggerInsert}
       />
     </>
   );

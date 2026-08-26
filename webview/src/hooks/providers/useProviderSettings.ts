@@ -32,12 +32,15 @@ export function useProviderSettings({ addToast, t }: UseProviderSettingsOptions)
     }
     const env = provider.settingsConfig.env as Record<string, unknown>;
     const get = (key: string): string => (typeof env[key] === 'string' ? (env[key] as string) : '');
+    // Prefer the *_MODEL_NAME entry (the real routed model, e.g. deepseek-v4-flash) for
+    // display; fall back to the *_MODEL slot entry so labels resolve without NAME.
+    const getDisplayModel = (key: string): string => get(`${key}_NAME`) || get(key);
     const mapping = {
-      main: get('ANTHROPIC_MODEL'),
-      fable: get('ANTHROPIC_DEFAULT_FABLE_MODEL'),
-      haiku: get('ANTHROPIC_DEFAULT_HAIKU_MODEL'),
-      sonnet: get('ANTHROPIC_DEFAULT_SONNET_MODEL'),
-      opus: get('ANTHROPIC_DEFAULT_OPUS_MODEL'),
+      main: getDisplayModel('ANTHROPIC_MODEL'),
+      fable: getDisplayModel('ANTHROPIC_DEFAULT_FABLE_MODEL'),
+      haiku: getDisplayModel('ANTHROPIC_DEFAULT_HAIKU_MODEL'),
+      sonnet: getDisplayModel('ANTHROPIC_DEFAULT_SONNET_MODEL'),
+      opus: getDisplayModel('ANTHROPIC_DEFAULT_OPUS_MODEL'),
     };
     writeClaudeModelMapping(mapping);
   }, []);

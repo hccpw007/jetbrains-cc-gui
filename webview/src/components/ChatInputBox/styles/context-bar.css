@@ -74,6 +74,15 @@
   margin-left: auto;
 }
 
+/* Trigger symbol buttons (/ @ !) — inherit context-tool-btn sizing, symbol uses
+ * monospace glyph for consistent alignment with the input-box placeholder text */
+.trigger-symbol-btn .trigger-symbol {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+  font-family: var(--font-mono, ui-monospace, 'SF Mono', Consolas, monospace);
+}
+
 /* StatusPanel toggle button */
 .status-panel-toggle {
   position: relative;

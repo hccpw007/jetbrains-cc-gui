@@ -188,8 +188,11 @@ export async function requestAskUserQuestionAnswers(input) {
 
           return answers;
         } catch (e) {
-          debugLog('ASK_USER_QUESTION_RESPONSE_ERROR', `Error reading/parsing response: ${errorClass(e)}`);
-          return null;
+          // Java 侧写响应文件是非原子的（Files.writeString），100ms 轮询可能恰好
+          // 读到写入中的不完整内容。不能直接放弃：回答一旦丢失模型就拿不到用户
+          // 输入。继续下一轮轮询（100ms 后），Java 写入完成后文件内容稳定，重试
+          // 必然解析成功；仅当文件永久损坏时由外层 timeout 兜底。
+          debugLog('ASK_USER_QUESTION_RESPONSE_RETRY', `Response not ready yet: ${errorClass(e)}, retrying`);
         }
       }
     }

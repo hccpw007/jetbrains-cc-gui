@@ -434,6 +434,48 @@ public class ModelProviderHandler {
         return baseModel;
     }
 
+    /**
+     * Resolve the model id billed for a turn, preferring the real routed model
+     * ({@code *_MODEL_NAME}, e.g. deepseek-v4-flash) over the Claude slot id
+     * ({@code *_MODEL}). Local settings written by proxies (cc-switch) keep the
+     * slot id in {@code *_MODEL} and put the real model only in {@code *_MODEL_NAME},
+     * so pricing keyed by the real model would otherwise never match.
+     */
+    public static String resolveConfiguredClaudeModelForPricing(String baseModel, JsonObject env) {
+        if (baseModel == null || baseModel.isEmpty() || env == null) {
+            return baseModel;
+        }
+        String lowerBaseModel = baseModel.toLowerCase();
+        if (!(lowerBaseModel.startsWith("claude-") || lowerBaseModel.startsWith("claude_"))) {
+            // Non-slot ids (e.g. deepseek-v4-flash[1m]) are already the real model.
+            return baseModel;
+        }
+        String mainModel = readConfiguredEnvValue(env, "ANTHROPIC_MODEL");
+        if (lowerBaseModel.contains("fable")) {
+            return resolveSlotModelForPricing(env, "ANTHROPIC_DEFAULT_FABLE_MODEL", mainModel, baseModel);
+        }
+        if (lowerBaseModel.contains("opus")) {
+            return resolveSlotModelForPricing(env, "ANTHROPIC_DEFAULT_OPUS_MODEL", mainModel, baseModel);
+        }
+        if (lowerBaseModel.contains("haiku")) {
+            return resolveSlotModelForPricing(env, "ANTHROPIC_DEFAULT_HAIKU_MODEL", mainModel, baseModel);
+        }
+        if (lowerBaseModel.contains("sonnet")) {
+            return resolveSlotModelForPricing(env, "ANTHROPIC_DEFAULT_SONNET_MODEL", mainModel, baseModel);
+        }
+        return mainModel != null ? mainModel : baseModel;
+    }
+
+    /** Prefer the {@code *_MODEL_NAME} entry (real model) over the slot {@code *_MODEL}, main model, then slot. */
+    private static String resolveSlotModelForPricing(JsonObject env, String slotKey, String mainModel, String baseModel) {
+        String named = readConfiguredEnvValue(env, slotKey + "_NAME");
+        if (named != null) {
+            return named;
+        }
+        String slot = readConfiguredEnvValue(env, slotKey);
+        return slot != null ? slot : (mainModel != null ? mainModel : baseModel);
+    }
+
     private static String readConfiguredEnvValue(JsonObject env, String key) {
         if (env == null || key == null || !env.has(key) || env.get(key).isJsonNull()) {
             return null;

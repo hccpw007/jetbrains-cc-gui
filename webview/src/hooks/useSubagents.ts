@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import type { ClaudeMessage, ClaudeRawMessage, ClaudeContentBlock, ToolResultBlock, SubagentHistoryResponse, SubagentInfo, SubagentStatus, TaskEvent, TaskEventMap } from '../types';
 import { normalizeToolInput } from '../utils/toolInputNormalization';
 import { normalizeToolName } from '../utils/toolConstants';
-import { extractResultText, isAsyncAgentInput, parseSpawnAgentMeta, readToolUseStatus } from '../utils/subagentResult';
+import { extractResultText, isAsyncAgentInput, isAsyncByAgentMetadata, parseSpawnAgentMeta, readToolUseStatus } from '../utils/subagentResult';
 import { useTaskEvents } from '../contexts/SubagentContext';
 
 type GetToolResultRawFn = (toolUseId: string) => ClaudeRawMessage | null;
@@ -127,9 +127,12 @@ export function extractSubagentsFromMessages(
       // launch ack text and tool-use status are passed as fallbacks so a
       // background agent whose input lacks run_in_background is still kept
       // "running" until its terminal event lands, instead of being marked
-      // completed the instant the ack arrives.
+      // completed the instant the ack arrives. isAsyncByAgentMetadata is an
+      // additional fallback for agents whose toolUseResult carries an agentId
+      // but no completion stats (or metadata dropped during serialization).
       const toolUseStatus = readToolUseStatus(getToolResultRaw(toolUseId));
-      const isAsync = isAsyncAgentInput(input, toolName, result, toolUseStatus);
+      const isAsync = isAsyncAgentInput(input, toolName, result, toolUseStatus)
+        || (toolUseId ? isAsyncByAgentMetadata(getToolResultRaw, toolUseId) : false);
       const status = determineStatus(result, isAsync, taskEvent);
       const resultMetadata = extractResultMetadata(result, getToolResultRaw, toolUseId, taskEvent);
       const spawnMeta = toolName === 'spawn_agent' ? parseSpawnAgentMeta(input, result) : {};

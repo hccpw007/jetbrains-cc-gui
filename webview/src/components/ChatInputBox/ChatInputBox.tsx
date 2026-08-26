@@ -49,6 +49,8 @@ import { SessionContext } from '../../contexts/SessionContext.js';
 import { useUIState } from '../../contexts/UIStateContext.js';
 import { ContextMenu } from '../ContextMenu';
 import { useContextMenu, copySelection, pasteAtCursor, insertNewline } from '../../hooks/useContextMenu.js';
+import { insertTextAtCursor } from './utils/selectionUtils.js';
+import { getVirtualCursorPosition } from './utils/virtualCursorUtils.js';
 import './styles.css';
 
 /**
@@ -642,6 +644,57 @@ export const ChatInputBox = memo(forwardRef<ChatInputBoxHandle, ChatInputBoxProp
       editableWrapperRef,
     });
 
+    /**
+     * Handle toolbar trigger symbol click (/ @ !)
+     * Inserts the symbol at the cursor and pulls up the matching completion dropdown.
+     *
+     * Trigger constraints enforced by detectTrigger:
+     * - @ : cursor must sit right after the @ (no whitespace between) — direct insert works anywhere.
+     * - / and ! : symbol must be at line start (or preceded by whitespace) — insert a newline
+     *   first when the cursor is mid-line so the dropdown reliably opens.
+     */
+    const handleTriggerInsert = useCallback((trigger: '/' | '@' | '!') => {
+      const el = editableRef.current;
+      if (!el) return;
+
+      // Put the caret inside the editable: reuse the imperative focus (which skips
+      // when a non-collapsed selection exists elsewhere). For the toolbar click the
+      // selection is normally collapsed, so focus lands in the input box.
+      focusInput();
+
+      const selection = window.getSelection();
+      const caretInEditable =
+        selection && selection.rangeCount > 0 && el.contains(selection.anchorNode);
+
+      // If the caret is not in the input box (e.g. first interaction), place it at
+      // the end so the symbol is appended rather than silently dropped.
+      if (!caretInEditable) {
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        range.collapse(false);
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+      }
+
+      // / and ! only trigger at line start; ensure the inserted symbol lands on a fresh line.
+      // Inserting the newline together with the symbol routes through the fast Range-API
+      // path (which renders \n as <br>) instead of execCommand, keeping the caret position
+      // deterministic for the completion detection that follows.
+      let insertText: string = trigger;
+      if (trigger !== '@') {
+        const text = getTextContent();
+        const offset = getVirtualCursorPosition(el);
+        const lineStart = text.lastIndexOf('\n', offset - 1) + 1;
+        if (offset > lineStart) {
+          insertText = `\n${trigger}`;
+        }
+      }
+
+      insertTextAtCursor(insertText, el);
+      // insertTextAtCursor dispatches an input event which drives handleInput ->
+      // debouncedDetectCompletion; the dropdown opens automatically.
+    }, [focusInput, editableRef, getTextContent]);
+
     return (
       <div
         className={`chat-input-box ${isResizingInputBox ? 'is-resizing' : ''}`}
@@ -683,6 +736,7 @@ export const ChatInputBox = memo(forwardRef<ChatInputBoxHandle, ChatInputBoxProp
           onDismissOpenSourceBanner={handleDismissOpenSourceBanner}
           autoOpenFileEnabled={autoOpenFileEnabled}
           onRequestEnableFileContext={handleRequestEnableFileContext}
+          onTriggerInsert={handleTriggerInsert}
         />
 
         {/* Input area */}
