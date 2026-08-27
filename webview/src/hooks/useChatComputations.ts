@@ -233,19 +233,19 @@ export function useChatComputations({
     return computeStatusScopeMessages(streamingActive, asyncAgentPresence, latestTurnMessages, messages, latestTurnHasToolUse);
   }, [streamingActive, asyncAgentPresence, latestTurnMessages, messages, getContentBlocks]);
 
-  // Subagents scan the conversation scope per provider: Claude widens to the
-  // full conversation (async run_in_background agents keep running across turns
-  // and must still appear as "running" while the user chats on), Codex is
-  // narrowed to its latest user turn via selectLatestSubagentTurn below.
+  // Plans/todos belong to the current user turn while streaming. Unlike
+  // subagents, a text-only new turn must not temporarily revive a previous
+  // turn's plan. Settled/history views scan the full transcript for Claude;
+  // Codex is always narrowed to its latest user turn inside deriveTodosForTurn.
   const todoScopeMessages = useMemo(
     () => (streamingActive ? latestTurnMessages : messages),
     [streamingActive, latestTurnMessages, messages],
   );
 
-  // Plans belong to the current user turn while streaming. Unlike subagents,
-  // a text-only new turn must not temporarily revive a previous turn's plan.
-  // Settled/history views scan the full transcript for Claude; Codex is always
-  // narrowed to its latest user turn inside deriveTodosForTurn.
+  // Subagents scan the conversation scope per provider: Claude widens to the
+  // full conversation (async run_in_background agents keep running across turns
+  // and must still appear as "running" while the user chats on), Codex is
+  // narrowed to its latest user turn via selectLatestSubagentTurn below.
   const extractedSubagents = useSubagents({
     messages: currentProvider === 'codex' ? messages : statusScopeMessages,
     getContentBlocks,
