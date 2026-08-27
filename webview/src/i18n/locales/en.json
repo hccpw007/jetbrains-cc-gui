@@ -1236,8 +1236,8 @@
       "mcpNameDesc": "Any MCP server name from your MCP servers list, e.g. an image-recognition server you configured.",
       "mcpNamePlaceholder": "e.g. my-image-mcp",
       "transmission": "Image transmission mode",
-      "transmissionDesc": "How the image is passed to the MCP. Path sends the temp file path; Base64 inlines the image data (only supported by MCPs that accept base64).",
-      "transmissionPath": "Path",
+      "transmissionDesc": "How the image is passed to the MCP. Temp file path sends the saved temporary file path; Base64 inlines the image data (only supported by MCPs that accept base64).",
+      "transmissionPath": "Temp file path",
       "transmissionBase64": "Base64"
     }
   },

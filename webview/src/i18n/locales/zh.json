@@ -1241,8 +1241,8 @@
       "mcpNameDesc": "MCP 服务器列表中的任意服务器名称，例如你配置的图像识别服务器。",
       "mcpNamePlaceholder": "例如 my-image-mcp",
       "transmission": "图片传输方式",
-      "transmissionDesc": "图片如何传递给 MCP。路径模式发送临时文件路径；Base64 模式内联图片数据（仅支持接受 base64 的 MCP）。",
-      "transmissionPath": "路径",
+      "transmissionDesc": "图片如何传递给 MCP。临时保存路径发送保存的临时文件路径；Base64 模式内联图片数据（仅支持接受 base64 的 MCP）。",
+      "transmissionPath": "临时保存路径",
       "transmissionBase64": "Base64"
     }
   },
