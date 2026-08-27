@@ -297,7 +297,7 @@ export const ModelConfigSelect = ({
       <button
         ref={buttonRef}
         type="button"
-        className="selector-button model-config-button"
+        className="selector-button selector-text-first model-config-button"
         onClick={handleToggle}
         title={summaryText}
         aria-label={t('modelConfig.title', { defaultValue: 'Model settings' })}
