@@ -1231,6 +1231,19 @@
         "selectHint": "选择要导出的提示词",
         "confirmExport": "确认导出"
       }
+    },
+    "visionMcp": {
+      "title": "视觉 MCP",
+      "desc": "将附带的图片通过图像识别 MCP 处理，而非使用原生视觉内容块。当你的模型后端（如代理转发的 DeepSeek）不支持图片输入时很有用。",
+      "enabled": "开启视觉 MCP",
+      "enabledDesc": "开启后，所有模型发送的附带图片都会交给选定的视觉 MCP 识别。关闭则回退到插件内置行为。",
+      "mcpName": "视觉 MCP 名称",
+      "mcpNameDesc": "MCP 服务器列表中的任意服务器名称，例如你配置的图像识别服务器。",
+      "mcpNamePlaceholder": "例如 my-image-mcp",
+      "transmission": "图片传输方式",
+      "transmissionDesc": "图片如何传递给 MCP。路径模式发送临时文件路径；Base64 模式内联图片数据（仅支持接受 base64 的 MCP）。",
+      "transmissionPath": "路径",
+      "transmissionBase64": "Base64"
     }
   },
   "history": {

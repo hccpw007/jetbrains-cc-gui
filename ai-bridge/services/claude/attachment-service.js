@@ -9,6 +9,11 @@ import path from 'path';
 import os from 'os';
 import crypto from 'crypto';
 import { modelSupportsVision } from '../../utils/model-utils.js';
+import {
+  loadVisionMcpConfig,
+  resolveVisionMcpToolName,
+  buildVisionMcpPrompt,
+} from './vision-mcp-config.js';
 
 // Image temp directory shared across the daemon's lifetime.
 const TEMP_IMAGE_SUBDIR = 'cc-gui-images';
@@ -178,24 +183,36 @@ export async function cleanupStaleTempImages() {
 /**
  * Build user message content blocks (supports images and text).
  *
- * Image transmission strategy depends on the target model:
- * - Claude models: Inline base64 vision content blocks (most efficient,
- *   natively supported by the Anthropic API).
- * - Non-Claude models (mimo, deepseek, qwen, etc.): Save images to temp files
- *   and reference paths in the message text. The model is asked to use the
- *   Read tool to load them, matching Claude Code CLI behavior. This avoids
- *   issues where third-party proxies silently drop vision content blocks.
+ * Image transmission strategy depends on the vision-MCP settings (loaded from
+ * ~/.codemoss/config.json via vision-mcp-config.js) and the target model:
+ * - enabled on: images are saved to temp files and injected as references the
+ *   model is asked to resolve via the selected vision MCP tool. Native vision
+ *   blocks are never produced, so a `claude-*` name served by a non-vision
+ *   proxy (DeepSeek et al.) no longer yields "[Unsupported Image]".
+ * - enabled off + Claude models: Inline base64 vision content blocks (most
+ *   efficient, natively supported by the Anthropic API).
+ * - enabled off + non-Claude models (mimo, deepseek, qwen, etc.): Save images
+ *   to temp files and reference paths in the message text. The model is asked
+ *   to use the Read tool to load them, matching Claude Code CLI behavior. This
+ *   avoids issues where third-party proxies silently drop vision content blocks.
  *
  * @param {Array} attachments - Attachment array
  * @param {string} message - User message text
  * @param {string|null} modelId - Resolved model ID actually sent to the API
  *                                  (e.g. "claude-sonnet-4-5", "mimo-v2.5-pro").
- *                                  Used to decide image transmission strategy.
+ *                                  Used to decide image transmission strategy
+ *                                  when the vision-MCP toggle is off.
+ * @param {Object} [opts] - Optional overrides (kept internal so the three call
+ *        sites in message-sender.js stay untouched):
+ *        - cwd: working directory for project-scoped MCP config.
+ *        - loadVisionMcpConfig: injectable config loader for tests.
+ *        - resolveVisionMcpToolName: injectable tool resolver for tests.
  * @returns {Array} Content block array
  */
-export async function buildContentBlocks(attachments, message, modelId = null) {
+export async function buildContentBlocks(attachments, message, modelId = null, opts = {}) {
+  const visionConfig = (opts.loadVisionMcpConfig || loadVisionMcpConfig)();
+  const useNativeVision = !visionConfig.enabled && modelSupportsVision(modelId);
   const contentBlocks = [];
-  const useNativeVision = modelSupportsVision(modelId);
   const imagePathRefs = [];
 
   for (const a of attachments) {
@@ -213,7 +230,11 @@ export async function buildContentBlocks(attachments, message, modelId = null) {
       } else {
         const tempPath = await saveImageToTemp(a.data, mt, a.fileName);
         if (tempPath) {
-          imagePathRefs.push(tempPath);
+          // Carry mediaType/data alongside the path rather than a bare path:
+          // with mixed attachments (image + text + image) indexing the original
+          // array by ref-index would alias across the text entry, so record the
+          // image's own info at save time.
+          imagePathRefs.push({ path: tempPath, mediaType: mt, data: a.data });
           console.log('[ATTACHMENTS] Saved image to temp for non-vision model:', tempPath);
         } else {
           contentBlocks.push({
@@ -244,10 +265,24 @@ export async function buildContentBlocks(attachments, message, modelId = null) {
   }
 
   if (imagePathRefs.length > 0) {
-    const refs = imagePathRefs
-      .map((p, idx) => `[Image #${idx + 1}: ${p}]`)
-      .join('\n');
-    userText = `${refs}\n\nThe user has attached the image(s) above. Please use the Read tool to view them.\n\n${userText}`;
+    // When a vision MCP is configured (toggle on + a server name set), steer the
+    // model to that MCP tool to resolve the images. The tool name is discovered
+    // at runtime (only the configured server is probed) so any image MCP works
+    // without a hard-coded server-to-tool mapping. Otherwise (toggle off, or no
+    // MCP name configured yet) keep the original path + Read-tool hint so users
+    // who never touched these settings see unchanged behavior.
+    let mcpPrompt = null;
+    if (visionConfig.enabled && visionConfig.mcpName) {
+      const { toolName } = await resolveVisionMcpToolName(
+        visionConfig.mcpName, opts.cwd, opts.resolveVisionMcpToolName);
+      mcpPrompt = buildVisionMcpPrompt(
+        imagePathRefs, visionConfig.mcpName, toolName, visionConfig.transmission);
+    }
+    userText = mcpPrompt
+      ? `${mcpPrompt}\n\n${userText}`
+      : `${imagePathRefs
+          .map((img, idx) => `[Image #${idx + 1}: ${img.path}]`)
+          .join('\n')}\n\nThe user has attached the image(s) above. Please use the Read tool to view them.\n\n${userText}`;
   }
 
   contentBlocks.push({ type: 'text', text: userText });

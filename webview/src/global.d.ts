@@ -397,6 +397,21 @@ interface Window {
   updateAutoOpenFileEnabled?: (json: string) => void;
 
   /**
+   * Update vision MCP enabled setting
+   */
+  updateVisionMcpEnabled?: (json: string) => void;
+
+  /**
+   * Update vision MCP name setting
+   */
+  updateVisionMcpName?: (json: string) => void;
+
+  /**
+   * Update vision MCP image transmission mode setting
+   */
+  updateVisionMcpImageTransmission?: (json: string) => void;
+
+  /**
    * Update commit AI prompt configuration
    */
   updateCommitPrompt?: (json: string) => void;

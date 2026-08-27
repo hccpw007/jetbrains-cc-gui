@@ -19,6 +19,7 @@ import CommitSection from './CommitSection';
 import PromptEnhancerSection from './PromptEnhancerSection';
 import OtherSettingsSection from './OtherSettingsSection';
 import PetSettingsSection from './PetSettingsSection';
+import VisionMcpSection from './VisionMcpSection';
 import { SkillsSettingsSection } from '../skills';
 import SettingsDialogs from './SettingsDialogs';
 import { setNewSessionConfirmEnabled as persistNewSessionConfirmEnabled } from '../../utils/skipNewSessionConfirm';
@@ -683,6 +684,8 @@ const SettingsView = ({
           )}
 
           {currentTab === 'pet' && <PetSettingsSection addToast={addToast} />}
+
+          {currentTab === 'visionMcp' && <VisionMcpSection />}
 
           {currentTab === 'other' && (
             <OtherSettingsSection

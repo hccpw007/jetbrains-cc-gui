@@ -1226,6 +1226,19 @@
         "selectHint": "Select prompts to export",
         "confirmExport": "Confirm Export"
       }
+    },
+    "visionMcp": {
+      "title": "Vision MCP",
+      "desc": "Route attached images through an image-recognition MCP instead of native vision blocks. Useful when your model backend (e.g. a proxy-served DeepSeek) does not support image input.",
+      "enabled": "Enable vision MCP",
+      "enabledDesc": "When enabled, ALL models send attached images to the selected vision MCP for recognition. Disable to fall back to the built-in behavior.",
+      "mcpName": "Vision MCP name",
+      "mcpNameDesc": "Any MCP server name from your MCP servers list, e.g. an image-recognition server you configured.",
+      "mcpNamePlaceholder": "e.g. my-image-mcp",
+      "transmission": "Image transmission mode",
+      "transmissionDesc": "How the image is passed to the MCP. Path sends the temp file path; Base64 inlines the image data (only supported by MCPs that accept base64).",
+      "transmissionPath": "Path",
+      "transmissionBase64": "Base64"
     }
   },
   "history": {

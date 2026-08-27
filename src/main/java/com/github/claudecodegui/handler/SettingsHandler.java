@@ -28,6 +28,7 @@ public class SettingsHandler extends BaseMessageHandler {
     private final NodePathHandler nodePathHandler;
     private final ClaudeCliPathHandler claudeCliPathHandler;
     private final ProjectConfigHandler projectConfigHandler;
+    private final VisionMcpSettingsHandler visionMcpSettingsHandler;
     // Handle for the theme-change callback registered with ThemeConfigService.
     // Kept so it can be cleanly unregistered when the owning window is disposed,
     // preventing notifications to disposed webviews (issue #1586).
@@ -108,7 +109,14 @@ public class SettingsHandler extends BaseMessageHandler {
         // User language preference
         "set_user_language",
         "get_user_language",
-        "clear_user_language"
+        "clear_user_language",
+        // Vision MCP settings
+        "get_vision_mcp_enabled",
+        "set_vision_mcp_enabled",
+        "get_vision_mcp_name",
+        "set_vision_mcp_name",
+        "get_vision_mcp_image_transmission",
+        "set_vision_mcp_image_transmission"
     };
 
     public SettingsHandler(HandlerContext context) {
@@ -121,6 +129,7 @@ public class SettingsHandler extends BaseMessageHandler {
         this.nodePathHandler = new NodePathHandler(context);
         this.claudeCliPathHandler = new ClaudeCliPathHandler(context);
         this.projectConfigHandler = new ProjectConfigHandler(context);
+        this.visionMcpSettingsHandler = new VisionMcpSettingsHandler(context);
         this.codexSubscriptionQuotaHandler = new CodexSubscriptionQuotaHandler(context);
         this.tokenTrackerHandler = new TokenTrackerHandler(context);
         // Register theme change listener to automatically notify frontend when IDE theme changes
@@ -381,6 +390,25 @@ public class SettingsHandler extends BaseMessageHandler {
                 return true;
             case "clear_user_language":
                 handleClearUserLanguage();
+                return true;
+            // Vision MCP settings
+            case "get_vision_mcp_enabled":
+                visionMcpSettingsHandler.handleGetVisionMcpEnabled();
+                return true;
+            case "set_vision_mcp_enabled":
+                visionMcpSettingsHandler.handleSetVisionMcpEnabled(content);
+                return true;
+            case "get_vision_mcp_name":
+                visionMcpSettingsHandler.handleGetVisionMcpName();
+                return true;
+            case "set_vision_mcp_name":
+                visionMcpSettingsHandler.handleSetVisionMcpName(content);
+                return true;
+            case "get_vision_mcp_image_transmission":
+                visionMcpSettingsHandler.handleGetVisionMcpImageTransmission();
+                return true;
+            case "set_vision_mcp_image_transmission":
+                visionMcpSettingsHandler.handleSetVisionMcpImageTransmission(content);
                 return true;
             default:
                 return false;
