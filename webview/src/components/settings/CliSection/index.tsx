@@ -22,9 +22,19 @@ interface CliToolCardProps {
   status?: CliToolStatus;
   onOpenInstall: (id: CliToolId) => void;
   onOpenDocs: (url: string) => void;
+  /** Nested inside a product group — show a role label instead of repeating the product name. */
+  nested?: boolean;
+  displayName?: string;
 }
 
-const CliToolCard = ({ tool, status, onOpenInstall, onOpenDocs }: CliToolCardProps) => {
+const CliToolCard = ({
+  tool,
+  status,
+  onOpenInstall,
+  onOpenDocs,
+  nested = false,
+  displayName,
+}: CliToolCardProps) => {
   const { t } = useTranslation();
   const installed = status?.installed === true;
   const version = status?.version;
@@ -37,17 +47,22 @@ const CliToolCard = ({ tool, status, onOpenInstall, onOpenDocs }: CliToolCardPro
     : description;
   const howToInstallLabel = t('settings.cli.howToInstall');
   const openDocsLabel = t('settings.cli.installDialog.openDocs');
+  const name = displayName ?? t(tool.nameKey);
 
   return (
     <div
-      className={`${styles.cliCard} ${installed ? styles.installed : styles.missing}`}
+      className={`${styles.cliCard} ${installed ? styles.installed : styles.missing} ${nested ? styles.nestedCard : ''}`}
     >
       <div className={styles.cliMain} title={metaTitle}>
         <div className={styles.cliIcon}>
-          <ProviderModelIcon providerId={tool.id} size={16} colored />
+          {nested ? (
+            <span className="codicon codicon-terminal" aria-hidden="true" />
+          ) : (
+            <ProviderModelIcon providerId={tool.id} size={16} colored />
+          )}
         </div>
 
-        <span className={styles.cliName}>{t(tool.nameKey)}</span>
+        <span className={styles.cliName} title={name}>{name}</span>
         {installed && version && (
           <span className={styles.versionBadge}>v{version}</span>
         )}
@@ -146,9 +161,10 @@ interface InstallDialogProps {
   tool: CliToolDefinition | null;
   onClose: () => void;
   onCopy: (text: string) => void;
+  onOpenDocs: (url: string) => void;
 }
 
-const InstallDialog = ({ tool, onClose, onCopy }: InstallDialogProps) => {
+const InstallDialog = ({ tool, onClose, onCopy, onOpenDocs }: InstallDialogProps) => {
   const { t } = useTranslation();
 
   useEffect(() => {
@@ -255,6 +271,11 @@ const InstallDialog = ({ tool, onClose, onCopy }: InstallDialogProps) => {
             href={tool.docsUrl}
             target="_blank"
             rel="noreferrer noopener"
+            onClick={(e) => {
+              // JCEF won't route target=_blank to the system browser — go through the bridge.
+              e.preventDefault();
+              onOpenDocs(tool.docsUrl);
+            }}
           >
             <span className="codicon codicon-link-external" aria-hidden="true" />
             {t('settings.cli.installDialog.openDocs')}
@@ -393,41 +414,66 @@ const CliSection = ({ addToast }: CliSectionProps) => {
 
       <div className={styles.cliList}>
         {loading && Object.keys(statusMap).length === 0 ? (
-          <>
-            <div className={styles.loadingState}>
-              <span className="codicon codicon-loading codicon-modifier-spin" />
-              <span>{t('settings.cli.loading')}</span>
-            </div>
-            <DshConnectionCard />
-          </>
+          <div className={styles.loadingState}>
+            <span className="codicon codicon-loading codicon-modifier-spin" />
+            <span>{t('settings.cli.loading')}</span>
+          </div>
         ) : statusError && Object.keys(statusMap).length === 0 ? (
-          <>
-            <div className={styles.errorState}>
-              <span className="codicon codicon-warning" />
-              <span>{t('settings.cli.loadFailed')}</span>
-              <button type="button" className={styles.refreshBtn} onClick={requestStatus}>
-                <span className="codicon codicon-refresh" />
-                {t('settings.cli.retry')}
-              </button>
-            </div>
-            <DshConnectionCard />
-          </>
+          <div className={styles.errorState}>
+            <span className="codicon codicon-warning" />
+            <span>{t('settings.cli.loadFailed')}</span>
+            <button type="button" className={styles.refreshBtn} onClick={requestStatus}>
+              <span className="codicon codicon-refresh" />
+              {t('settings.cli.retry')}
+            </button>
+          </div>
         ) : (
-          CLI_TOOL_DEFINITIONS.map((tool) => (
-            <div
-              key={tool.id}
-              className={tool.id === 'dsh' ? styles.dshGroup : undefined}
-            >
-              <CliToolCard
-                tool={tool}
-                status={statusMap[tool.id]}
-                onOpenInstall={openInstallGuide}
-                onOpenDocs={openDocs}
-              />
-              {/* Host connection belongs with the DSH install row, not above the whole CLI list. */}
-              {tool.id === 'dsh' && <DshConnectionCard />}
-            </div>
-          ))
+          CLI_TOOL_DEFINITIONS.map((tool) => {
+            if (tool.id !== 'dsh') {
+              return (
+                <CliToolCard
+                  key={tool.id}
+                  tool={tool}
+                  status={statusMap[tool.id]}
+                  onOpenInstall={openInstallGuide}
+                  onOpenDocs={openDocs}
+                />
+              );
+            }
+
+            const dshInstalled = statusMap.dsh?.installed === true;
+            return (
+              <div
+                key={tool.id}
+                className={`${styles.dshGroup} ${dshInstalled ? styles.installed : ''}`}
+                data-testid="dsh-group"
+                role="group"
+                aria-labelledby="dsh-group-title"
+              >
+                <div className={styles.dshGroupHeader}>
+                  <div className={styles.cliIcon}>
+                    <ProviderModelIcon providerId={tool.id} size={16} colored />
+                  </div>
+                  <span
+                    id="dsh-group-title"
+                    className={styles.dshGroupTitle}
+                    title={t('settings.cli.dsh.groupTitle')}
+                  >
+                    {t('settings.cli.dsh.groupTitle')}
+                  </span>
+                </div>
+                <CliToolCard
+                  tool={tool}
+                  status={statusMap[tool.id]}
+                  onOpenInstall={openInstallGuide}
+                  onOpenDocs={openDocs}
+                  nested
+                  displayName={t('settings.cli.dsh.cliRowTitle')}
+                />
+                {dshInstalled && <DshConnectionCard nested />}
+              </div>
+            );
+          })
         )}
       </div>
 
@@ -439,6 +485,7 @@ const CliSection = ({ addToast }: CliSectionProps) => {
         tool={installTool}
         onClose={() => setInstallTool(null)}
         onCopy={handleCopy}
+        onOpenDocs={openDocs}
       />
     </div>
   );

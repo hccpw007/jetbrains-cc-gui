@@ -35,6 +35,7 @@ public class SettingsHandler extends BaseMessageHandler {
     private ThemeConfigService.RegisteredCallback themeCallbackHandle;
     private final CodexSubscriptionQuotaHandler codexSubscriptionQuotaHandler;
     private final TokenTrackerHandler tokenTrackerHandler;
+    private final DshPresetHandler dshPresetHandler;
 
     private static final String[] SUPPORTED_TYPES = {
         "get_mode",
@@ -43,6 +44,7 @@ public class SettingsHandler extends BaseMessageHandler {
         "set_provider",
         "set_reasoning_effort",
         "set_codex_fast_mode",
+        "set_dsh_preset",
         "get_node_path",
         "set_node_path",
         "get_claude_cli_path",
@@ -132,6 +134,7 @@ public class SettingsHandler extends BaseMessageHandler {
         this.visionMcpSettingsHandler = new VisionMcpSettingsHandler(context);
         this.codexSubscriptionQuotaHandler = new CodexSubscriptionQuotaHandler(context);
         this.tokenTrackerHandler = new TokenTrackerHandler(context);
+        this.dshPresetHandler = new DshPresetHandler(context);
         // Register theme change listener to automatically notify frontend when IDE theme changes
         registerThemeChangeListener();
     }
@@ -188,6 +191,9 @@ public class SettingsHandler extends BaseMessageHandler {
                 return true;
             case "set_codex_fast_mode":
                 modelProviderHandler.handleSetCodexFastMode(content);
+                return true;
+            case "set_dsh_preset":
+                dshPresetHandler.handleSetDshPreset(content);
                 return true;
             // Node path
             case "get_node_path":

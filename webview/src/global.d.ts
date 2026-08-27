@@ -23,7 +23,13 @@ interface Window {
   getClipboardFilePath?: () => Promise<string>;
 
   /**
-   * Handle file path(s) dropped from Java (supports batch files)
+   * Insert structured absolute file references from Java or another IDE
+   * integration. The array form preserves spaces inside each path.
+   */
+  insertFileReferencesAtCursor?: (filePathInput: string | string[]) => void;
+
+  /**
+   * Legacy file-path callback retained for older integrations.
    */
   handleFilePathFromJava?: (filePathInput: string | string[]) => void;
 
@@ -141,6 +147,9 @@ interface Window {
    * Subagent sidechain history callback.
    */
   onSubagentHistoryLoaded?: (json: string) => void;
+
+  /** Batched lightweight Codex subagent lifecycle status callback. */
+  onSubagentStatusesLoaded?: (json: string) => void;
 
   /**
    * task_* SDK system event callback (async subagent lifecycle).
@@ -1103,6 +1112,9 @@ interface Window {
    */
   __INITIAL_TAB_MODEL__?: string;
 
+  /** User-installed DSH agent preset ids discovered from the DSH home. */
+  __INITIAL_DSH_PRESETS__?: string[];
+
   /** Runtime page generation established by Java before exposing the bridge. */
   __CCG_PAGE_GENERATION__?: number;
 
@@ -1172,6 +1184,8 @@ interface Window {
           success?: boolean;
           provider?: string;
           models?: Array<{ id?: string; label?: string; description?: string }>;
+          /** Dynamic model roles (omp); description = resolved model selector. */
+          roles?: Array<{ id?: string; label?: string; description?: string }>;
           error?: string;
           defaultModel?: string;
         }

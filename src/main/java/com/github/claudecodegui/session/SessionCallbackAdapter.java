@@ -343,7 +343,12 @@ public class SessionCallbackAdapter implements ClaudeSession.SessionCallback {
         if (isInactive()) {
             return;
         }
-        // Reset throttlers for the new turn's deltas
+        // Flush BEFORE resetting: block boundaries now fire mid-response (one per
+        // content-block edge, not just per tool-loop turn), so deltas buffered in
+        // the throttlers belong to the ending block. reset() alone would silently
+        // drop them and force the frontend to fall back to updateMessages snapshots.
+        contentDeltaThrottler.flushNow();
+        thinkingDeltaThrottler.flushNow();
         contentDeltaThrottler.reset();
         thinkingDeltaThrottler.reset();
         ApplicationManager.getApplication().invokeLater(() -> {
