@@ -125,7 +125,9 @@ export async function canUseTool(toolName, input, options = {}) {
       debugLog('ASK_USER_QUESTION_FAILED', 'Failed to get answers from user', { elapsed: `${elapsed}ms` });
       return {
         behavior: 'deny',
-        message: 'User did not provide answers'
+        // 超时通常意味着弹窗未能显示（窗口已关闭 / webview 不可达），而非用户拒绝。
+        // 明确提示，避免把「弹窗没弹」误解为「用户选择不回答」。
+        message: 'The question dialog was not answered (timed out — the dialog likely never appeared). The question has been cancelled.'
       };
     }
   }

@@ -199,6 +199,16 @@ export async function requestAskUserQuestionAnswers(input) {
 
     const elapsed = Date.now() - requestStartTime;
     debugLog('ASK_USER_QUESTION_TIMEOUT', `Timeout waiting for answers`, { elapsed: `${elapsed}ms`, timeout: `${timeout}ms` });
+
+    // 超时后请求已无意义：弹窗未能显示（窗口关闭 / webview 不可达 / 会话已移除）。
+    // 主动清理残留的请求文件，避免孤儿文件永久滞留。
+    try {
+      unlinkSync(requestFile);
+      debugLog('ASK_USER_QUESTION_FILE_CLEANUP_TIMEOUT', `Request file deleted after timeout`);
+    } catch (cleanupError) {
+      debugLog('ASK_USER_QUESTION_FILE_CLEANUP_TIMEOUT_ERROR', `Failed to delete request file after timeout: ${errorClass(cleanupError)}`);
+    }
+
     return null;
 
   } catch (error) {

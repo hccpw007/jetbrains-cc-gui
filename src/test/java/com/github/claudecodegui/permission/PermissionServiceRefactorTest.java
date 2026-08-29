@@ -318,6 +318,68 @@ public class PermissionServiceRefactorTest {
         }
     }
 
+    @Test
+    public void stopAndCleanupFilesPurgesOrphanedIpcFiles() throws Exception {
+        // Regression: closing a session (window/tab disposed) must purge leftover
+        // ask/request files. Otherwise a request written by a still-alive Node
+        // daemon after the watcher stops stays orphaned forever and the dialog
+        // silently never appears — the AskUserQuestion flakiness report.
+        Path permissionDir = Files.createTempDirectory("permission-close-cleanup");
+        try {
+            PermissionService service = createPermissionServiceWithReflection(permissionDir, "session-a");
+
+            // Orphaned files for this session that were never consumed.
+            Files.writeString(permissionDir.resolve("request-session-a-1.json"), "{}");
+            Files.writeString(permissionDir.resolve("ask-user-question-session-a-2.json"), "{}");
+            Files.writeString(permissionDir.resolve("plan-approval-session-a-3.json"), "{}");
+            // A live other session must never be touched.
+            Files.writeString(permissionDir.resolve("ask-user-question-session-b-4.json"), "{}");
+            Files.writeString(permissionDir.resolve("notes.txt"), "keep");
+
+            service.stopAndCleanupFiles();
+
+            assertFalse("orphaned request must be purged", Files.exists(permissionDir.resolve("request-session-a-1.json")));
+            assertFalse("orphaned ask must be purged", Files.exists(permissionDir.resolve("ask-user-question-session-a-2.json")));
+            assertFalse("orphaned plan must be purged", Files.exists(permissionDir.resolve("plan-approval-session-a-3.json")));
+            assertTrue("other session files must survive", Files.exists(permissionDir.resolve("ask-user-question-session-b-4.json")));
+            assertTrue("unrelated files must survive", Files.exists(permissionDir.resolve("notes.txt")));
+        } finally {
+            deleteDirectory(permissionDir);
+        }
+    }
+
+    /**
+     * Builds a PermissionService whose private {@code fileProtocol} and
+     * {@code requestWatcher} are replaced (via reflection) with instances bound to
+     * the given temporary dir, so {@link PermissionService#stopAndCleanupFiles()}
+     * can be exercised without touching the real {@code CLAUDE_PERMISSION_DIR}.
+     */
+    private PermissionService createPermissionServiceWithReflection(Path permissionDir, String sessionId)
+            throws Exception {
+        Gson gson = new Gson();
+        PermissionFileProtocol fileProtocol = new PermissionFileProtocol(
+                permissionDir, sessionId, gson, (tag, message) -> {
+        });
+        PermissionRequestWatcher watcher = new PermissionRequestWatcher(
+                permissionDir, sessionId, fileProtocol, (tag, message) -> {
+        });
+
+        java.lang.reflect.Constructor<PermissionService> ctor =
+                PermissionService.class.getDeclaredConstructor(com.intellij.openapi.project.Project.class, String.class);
+        ctor.setAccessible(true);
+        PermissionService service = ctor.newInstance(null, sessionId);
+
+        java.lang.reflect.Field protocolField = PermissionService.class.getDeclaredField("fileProtocol");
+        protocolField.setAccessible(true);
+        protocolField.set(service, fileProtocol);
+
+        java.lang.reflect.Field watcherField = PermissionService.class.getDeclaredField("requestWatcher");
+        watcherField.setAccessible(true);
+        watcherField.set(service, watcher);
+
+        return service;
+    }
+
     private JsonObject readJson(Path path) throws IOException {
         assertTrue(Files.exists(path));
         JsonObject object = new Gson().fromJson(Files.readString(path), JsonObject.class);

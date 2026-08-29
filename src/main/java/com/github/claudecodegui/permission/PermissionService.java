@@ -148,7 +148,14 @@ public class PermissionService {
     }
 
     public static synchronized void removeInstance(String sessionId) {
-        PermissionSessionRegistry.removeInstance(sessionId);
+        // Explicit session close (window/tab disposed): stop the watcher and purge
+        // leftover IPC files. Prevents AskUserQuestion / permission requests written
+        // by a still-alive Node daemon after the tab is closed from lingering forever
+        // without a consumer — the dialog would silently never appear.
+        PermissionService removed = PermissionSessionRegistry.removeInstance(sessionId);
+        if (removed != null) {
+            removed.stopAndCleanupFiles();
+        }
     }
 
     @Deprecated(since = "0.1.6", forRemoval = true)
@@ -229,6 +236,22 @@ public class PermissionService {
 
     public void stop() {
         requestWatcher.stop();
+    }
+
+    /**
+     * Stops the watcher and purges every leftover IPC file for this session.
+     *
+     * <p>Used only on explicit session close (window/tab disposed). Once the
+     * watcher stops it can no longer consume files, so any request that Node
+     * still holds — an AskUserQuestion issued from a background task after the
+     * tab was closed, for example — would otherwise stay orphaned forever and
+     * make the dialog silently never appear. Idle-timeout cleanup keeps using
+     * plain {@link #stop()} so files of a still-alive session are never wiped.
+     */
+    void stopAndCleanupFiles() {
+        requestWatcher.stop();
+        fileProtocol.cleanupSessionFiles();
+        LOG.info("[PERM_CLOSE] Stopped and purged leftover IPC files for sessionId=" + sessionId);
     }
 
     long getLastActivityTime() {

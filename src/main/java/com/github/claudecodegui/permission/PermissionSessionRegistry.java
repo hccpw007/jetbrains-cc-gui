@@ -53,9 +53,18 @@ class PermissionSessionRegistry {
         return legacyInstance;
     }
 
-    static synchronized void removeInstance(String sessionId) {
+    /**
+     * Removes the session instance and stops its watcher.
+     *
+     * @return the removed {@link PermissionService}, or null if the session was
+     *         not registered. Returning the instance lets callers that own an
+     *         explicit close path (e.g. window disposal) purge leftover IPC files
+     *         afterwards; idle-timeout cleanup ignores the return value on purpose
+     *         so files of a still-alive session are never wiped.
+     */
+    static synchronized PermissionService removeInstance(String sessionId) {
         if (sessionId == null || sessionId.isEmpty()) {
-            return;
+            return null;
         }
         PermissionService removed = INSTANCES_BY_SESSION_ID.remove(sessionId);
         if (removed != null) {
@@ -63,6 +72,7 @@ class PermissionSessionRegistry {
             LOG.info(String.format("PermissionService instance removed for sessionId=%s, remaining instances=%d",
                     sessionId, INSTANCES_BY_SESSION_ID.size()));
         }
+        return removed;
     }
 
     private static synchronized void cleanupStaleInstancesIfNeeded() {

@@ -120,3 +120,34 @@ test('daemon must not overwrite CLAUDE_SESSION_ID with params.sessionId', async 
     /process\.env\.CLAUDE_SESSION_ID\s*=\s*params\.sessionId/
   );
 });
+
+// Regression: when an AskUserQuestion times out (dialog never shown — window
+// closed / webview unreachable / session removed), the request file must be
+// purged so it cannot linger as an orphan forever. The real 300s+ timeout is
+// not unit-testable, so assert the branch removes the file on the source level.
+test('ask-user-question timeout branch purges its request file', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const { fileURLToPath } = await import('node:url');
+  const { dirname, join } = await import('node:path');
+  const source = await readFile(
+    join(dirname(fileURLToPath(import.meta.url)), 'permission-ipc.js'),
+    'utf8'
+  );
+  const timeoutBranch = source.slice(source.indexOf('ASK_USER_QUESTION_TIMEOUT'));
+  assert.match(timeoutBranch, /unlinkSync\(requestFile\)/);
+});
+
+// Regression: the AskUserQuestion deny message on timeout must say the dialog
+// likely never appeared, not "user did not answer" — otherwise a silent dialog
+// failure reads as an intentional user rejection.
+test('ask-user-question timeout deny message explains the dialog likely never appeared', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const { fileURLToPath } = await import('node:url');
+  const { dirname, join } = await import('node:path');
+  const source = await readFile(
+    join(dirname(fileURLToPath(import.meta.url)), 'permission-handler.js'),
+    'utf8'
+  );
+  assert.match(source, /dialog likely never appeared/);
+  assert.doesNotMatch(source, /User did not provide answers/);
+});
