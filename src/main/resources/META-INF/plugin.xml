@@ -1,5 +1,5 @@
 <idea-plugin>
-    <id>com.github.idea-claude-code-gui</id>
+    <id>cpw.com.github.idea-claude-code-gui</id>
     <name>CC GUI (Claude, Codex and More)</name>
     <vendor>MossX</vendor>
 
