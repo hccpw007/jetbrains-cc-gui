@@ -89,8 +89,7 @@
     "retrySdkStatus": "Réessayer",
     "openSourceBanner": "Ce projet est garanti 100% open source et gratuit (méfiez-vous des projets piratés)",
     "openSourceBannerStar": "Star",
-    "openSourceBannerStarToast": "Lien copié dans le presse-papiers — collez-le dans votre navigateur pour y accéder ⭐",
-    "openSourceBannerStarAria": "Copier le lien et mettre une étoile sur GitHub",
+    "openSourceBannerStarAria": "Ouvrir le dépôt sur GitHub et mettre une étoile",
     "goInstallSdk": "Aller installer",
     "commandNotImplemented": "La fonctionnalité `{{command}}` n'est pas encore implémentée.",
     "clearCommandDescription": "Effacer l'historique et démarrer une nouvelle session",
@@ -518,11 +517,18 @@
     "communityDesc": "Scannez le code QR ci-dessous pour rejoindre le groupe WeChat officiel pour obtenir les dernières nouvelles et le support technique",
     "communityQrTip": "Scannez avec WeChat pour rejoindre la communauté",
     "communityQrAlt": "Code QR de la communauté WeChat officielle",
-    "githubTitle": "Dépôt GitHub",
-    "githubDesc": "Ce projet est open source sur GitHub. Mettez une étoile pour nous soutenir !",
-    "githubCopyBtn": "Copier l'URL du dépôt",
-    "githubCopied": "URL du dépôt copiée dans le presse-papiers. Veuillez l'ouvrir dans votre navigateur.",
-    "githubCopyFailed": "Échec de la copie. Veuillez copier manuellement.",
+    "socialDocs": "Documentation officielle",
+    "socialTitle": "Suivez-nous",
+    "socialGithub": "Dépôt GitHub — mettez une étoile !",
+    "socialX": "X (Twitter) @ZPeng31310",
+    "socialZhihu": "Zhihu @vscodeai",
+    "socialXiaohongshu": "Xiaohongshu (RED)",
+    "socialDouyin": "Douyin — survolez pour scanner et suivre",
+    "socialYoutube": "Chaîne YouTube",
+    "douyinQrAlt": "Code QR Douyin",
+    "douyinId": "ID Douyin : nengyongai",
+    "douyinCopied": "ID Douyin copié dans le presse-papiers",
+    "douyinCopyFailed": "Échec de la copie. Veuillez copier manuellement.",
     "sponsor": "Sponsor",
     "sponsorDesc": "If this project helps you, consider sponsoring to support ongoing maintenance!",
     "alipay": "Alipay",
@@ -882,7 +888,11 @@
       "listTitle": "Outils CLI locaux",
       "summary": "{{installed}} / {{total}} installés",
       "moreComingSoon": "D’autres à venir",
-      "copyPath": "Copier le chemin"
+      "copyPath": "Copier le chemin",
+      "visibility": {
+        "hide": "Masquer dans le sélecteur de fournisseur",
+        "show": "Afficher dans le sélecteur de fournisseur"
+      }
     }
   },
   "history": {

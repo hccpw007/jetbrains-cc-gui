@@ -231,6 +231,7 @@ async function createRuntime(requestContext, callbacks) {
     stderrLines: [],
     query: null,
     inputStream: new AsyncStream(),
+    lastEmittedSessionId: null,
     titleGenerationAttempted: false
   };
 

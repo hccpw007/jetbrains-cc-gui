@@ -420,8 +420,11 @@ _sessionCleanupTimer.unref();
 
       if (msg?.type === 'system' && msg.session_id) {
         turnState.finalSessionId = msg.session_id;
-        console.log('[SESSION_ID]', msg.session_id);
-        registerRuntimeSession(runtime, msg.session_id, { registerActiveQueryResult, removeSession });
+        if (runtime.lastEmittedSessionId !== msg.session_id) {
+          runtime.lastEmittedSessionId = msg.session_id;
+          console.log('[SESSION_ID]', msg.session_id);
+          registerRuntimeSession(runtime, msg.session_id, { registerActiveQueryResult, removeSession });
+        }
       }
 
       if (msg?.type === 'result') {

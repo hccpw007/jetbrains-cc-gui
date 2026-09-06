@@ -167,7 +167,7 @@ export const ChatScreen = ({
     previousMessageKeySnapshotRef.current = messageKeySnapshot;
   }, [messageKeySnapshot]);
   const {
-    setSettingsInitialTab, setCurrentView,
+    setSettingsInitialTab, setCurrentView, setSettingsProviderSubTab,
     contextInfo, setContextInfo,
     setAddModelDialogOpen,
     addToast,
@@ -380,6 +380,11 @@ export const ChatScreen = ({
           onClearContext={() => setContextInfo(null)}
           onOpenAgentSettings={() => {
             setSettingsInitialTab('agents');
+            setCurrentView('settings');
+          }}
+          onOpenCliSettings={() => {
+            setSettingsInitialTab('providers');
+            setSettingsProviderSubTab('cli');
             setCurrentView('settings');
           }}
           onOpenPromptSettings={() => {

@@ -98,6 +98,7 @@ const App = () => {
   const {
     currentView, setCurrentView,
     settingsInitialTab, setSettingsInitialTab,
+    settingsProviderSubTab, setSettingsProviderSubTab,
     toasts, addToast, dismissToast, clearToasts,
     setContextInfo,
     searchOpen, setSearchOpen,
@@ -569,6 +570,7 @@ const App = () => {
         onHistory={() => setCurrentView('history')}
         onSettings={() => {
           setSettingsInitialTab(undefined);
+          setSettingsProviderSubTab(undefined);
           setCurrentView('settings');
         }}
         onOpenSearch={() => setSearchOpen(true)}
@@ -585,6 +587,7 @@ const App = () => {
         <SettingsView
           onClose={() => setCurrentView('chat')}
           initialTab={settingsInitialTab}
+          initialProviderSubTab={settingsProviderSubTab}
           currentProvider={currentProvider}
           streamingEnabled={streamingEnabledSetting}
           onStreamingEnabledChange={handleStreamingEnabledChange}

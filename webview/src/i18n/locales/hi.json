@@ -89,8 +89,7 @@
     "retrySdkStatus": "पुनः प्रयास करें",
     "openSourceBanner": "यह प्रोजेक्ट 100% ओपन सोर्स और मुफ़्त है (नकली प्रोजेक्ट से सावधान रहें)",
     "openSourceBannerStar": "Star",
-    "openSourceBannerStarToast": "रिपॉजिटरी लिंक क्लिपबोर्ड पर कॉपी हो गया — ब्राउज़र में पेस्ट करके खोलें ⭐",
-    "openSourceBannerStarAria": "रिपॉजिटरी लिंक कॉपी करें और GitHub पर स्टार करें",
+    "openSourceBannerStarAria": "GitHub पर रिपॉजिटरी खोलें और स्टार करें",
     "goInstallSdk": "इंस्टॉल करने जाएं",
     "commandNotImplemented": "`{{command}}` सुविधा अभी तक लागू नहीं की गई है।",
     "clearCommandDescription": "बातचीत इतिहास साफ़ करें और नया सत्र शुरू करें",
@@ -518,11 +517,18 @@
     "communityDesc": "नवीनतम जानकारी और तकनीकी सहायता के लिए आधिकारिक WeChat समूह में शामिल होने के लिए नीचे QR कोड स्कैन करें",
     "communityQrTip": "WeChat से स्कैन करके समुदाय में शामिल हों",
     "communityQrAlt": "आधिकारिक WeChat समुदाय QR कोड",
-    "githubTitle": "GitHub रिपॉजिटरी",
-    "githubDesc": "यह प्रोजेक्ट GitHub पर ओपन सोर्स है। सपोर्ट के लिए Star करें!",
-    "githubCopyBtn": "रिपॉजिटरी URL कॉपी करें",
-    "githubCopied": "रिपॉजिटरी URL क्लिपबोर्ड पर कॉपी हो गया। कृपया इसे अपने ब्राउज़र में खोलें।",
-    "githubCopyFailed": "कॉपी करने में विफल। कृपया मैन्युअल रूप से कॉपी करें।",
+    "socialDocs": "आधिकारिक दस्तावेज़",
+    "socialTitle": "हमें फॉलो करें",
+    "socialGithub": "GitHub रिपॉजिटरी — Star करें!",
+    "socialX": "X (Twitter) @ZPeng31310",
+    "socialZhihu": "Zhihu @vscodeai",
+    "socialXiaohongshu": "Xiaohongshu (RED)",
+    "socialDouyin": "Douyin — फॉलो करने के लिए होवर करके स्कैन करें",
+    "socialYoutube": "YouTube चैनल",
+    "douyinQrAlt": "Douyin QR कोड",
+    "douyinId": "Douyin ID: nengyongai",
+    "douyinCopied": "Douyin ID क्लिपबोर्ड पर कॉपी हो गया",
+    "douyinCopyFailed": "कॉपी करने में विफल। कृपया मैन्युअल रूप से कॉपी करें।",
     "sponsor": "Sponsor",
     "sponsorDesc": "If this project helps you, consider sponsoring to support ongoing maintenance!",
     "alipay": "Alipay",
@@ -882,7 +888,11 @@
       "listTitle": "स्थानीय CLI टूल",
       "summary": "{{installed}} / {{total}} स्थापित",
       "moreComingSoon": "जल्द और समर्थन",
-      "copyPath": "पथ कॉपी करें"
+      "copyPath": "पथ कॉपी करें",
+      "visibility": {
+        "hide": "प्रदाता स्विचर में छिपाएँ",
+        "show": "प्रदाता स्विचर में दिखाएँ"
+      }
     }
   },
   "history": {

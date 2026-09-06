@@ -513,8 +513,8 @@ export const OMP_MODELS: ModelInfo[] = [
 
 /**
  * OMP model roles — `omp --model <role>` resolves role names natively.
- * These always appear in the omp model dropdown; the mode selector is a
- * shortcut that sets the model to the same role id.
+ * Shown in the mode selector (ModeSelect); selecting a role sets the model
+ * to the role id. They deliberately do NOT appear in the model dropdown.
  */
 export const OMP_ROLE_MODELS: ModelInfo[] = [
   {
@@ -851,6 +851,8 @@ export interface ChatInputBoxProps {
   onOpenPromptSettings?: () => void;
   /** Open model settings (navigate to provider management to add models) */
   onOpenModelSettings?: () => void;
+  /** Open CLI management settings (Settings → Providers → CLI) */
+  onOpenCliSettings?: () => void;
 
   /** Whether has messages (for rewind button display) */
   hasMessages?: boolean;
@@ -947,6 +949,8 @@ export interface ButtonAreaProps {
   onOpenAgentSettings?: () => void;
   /** Navigate to model management to add models */
   onAddModel?: () => void;
+  /** Open CLI management settings (Settings → Providers → CLI) */
+  onOpenCliSettings?: () => void;
   /** Whether long context (1M) is enabled */
   longContextEnabled?: boolean;
   /** Toggle long context callback */

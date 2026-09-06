@@ -106,8 +106,7 @@
     "retrySdkStatus": "重试",
     "openSourceBanner": "本项目保证100%开源和免费（谨防盗版项目）",
     "openSourceBannerStar": "点个 Star",
-    "openSourceBannerStarToast": "已复制仓库地址到剪切板，复制到浏览器即可访问 ⭐",
-    "openSourceBannerStarAria": "复制仓库地址并前往 GitHub 点 Star",
+    "openSourceBannerStarAria": "前往 GitHub 点 Star",
     "goInstallSdk": "前往安装",
     "sdkTooLowForFable": "Claude SDK 版本过低，Fable 模型可能无法使用。请在设置中更新 Claude Code SDK。",
     "updateSdk": "更新 SDK",
@@ -680,6 +679,10 @@
       "summary": "{{installed}} / {{total}} 已安装",
       "moreComingSoon": "即将支持更多",
       "copyPath": "复制路径",
+      "visibility": {
+        "hide": "在切换菜单中隐藏",
+        "show": "在切换菜单中显示"
+      },
       "dsh": {
         "groupTitle": "DeepSeek Harness",
         "cliRowTitle": "CLI 安装",
@@ -890,11 +893,18 @@
     "versionHistoryDesc": "查看所有版本更新记录",
     "communityQrTip": "使用微信扫一扫",
     "communityQrAlt": "官方微信交流群二维码",
-    "githubTitle": "GitHub 开源地址",
-    "githubDesc": "本项目已在 GitHub 开源，欢迎 Star 支持",
-    "githubCopyBtn": "复制开源地址",
-    "githubCopied": "开源地址已复制到剪切板，请在浏览器中访问",
-    "githubCopyFailed": "复制失败，请手动复制",
+    "socialDocs": "官方文档",
+    "socialTitle": "关注我们",
+    "socialGithub": "GitHub 开源仓库，欢迎 Star",
+    "socialX": "X（Twitter）@ZPeng31310",
+    "socialZhihu": "知乎 @vscodeai",
+    "socialXiaohongshu": "小红书",
+    "socialDouyin": "抖音，鼠标悬停扫码关注",
+    "socialYoutube": "YouTube 频道 @昆鹏马上优化",
+    "douyinQrAlt": "抖音二维码",
+    "douyinId": "抖音号：nengyongai",
+    "douyinCopied": "抖音号已复制到剪贴板",
+    "douyinCopyFailed": "复制失败，请手动复制",
     "sponsor": "赞助支持",
     "sponsorDesc": "如果这个项目对你有帮助，欢迎赞助支持，你的支持是我持续维护的动力！",
     "alipay": "支付宝",
@@ -2204,7 +2214,8 @@
     },
     "dsh": {
       "label": "DeepSeek Harness"
-    }
+    },
+    "manageCli": "CLI 配置管理"
   },
   "promptEnhancer": {
     "title": "增强提示词",

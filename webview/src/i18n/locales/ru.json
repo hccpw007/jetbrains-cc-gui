@@ -89,8 +89,7 @@
     "retrySdkStatus": "Повторить",
     "openSourceBanner": "Этот проект гарантированно 100% с открытым исходным кодом и бесплатный (остерегайтесь пиратских проектов)",
     "openSourceBannerStar": "Star",
-    "openSourceBannerStarToast": "Ссылка скопирована в буфер обмена — вставьте её в браузере, чтобы открыть ⭐",
-    "openSourceBannerStarAria": "Скопировать ссылку и поставить звезду на GitHub",
+    "openSourceBannerStarAria": "Открыть репозиторий на GitHub и поставить звезду",
     "goInstallSdk": "Перейти к установке",
     "commandNotImplemented": "Функция `{{command}}` ещё не реализована.",
     "clearCommandDescription": "Очистить историю и начать новый чат",
@@ -530,11 +529,18 @@
     "versionHistoryDesc": "Просмотр всех записей об обновлениях версий",
     "communityQrTip": "Отсканируйте WeChat для вступления в сообщество",
     "communityQrAlt": "QR-код официального сообщества WeChat",
-    "githubTitle": "Репозиторий GitHub",
-    "githubDesc": "Этот проект с открытым исходным кодом на GitHub. Поставьте звезду в поддержку!",
-    "githubCopyBtn": "Скопировать URL репозитория",
-    "githubCopied": "URL репозитория скопирован в буфер обмена. Откройте его в браузере.",
-    "githubCopyFailed": "Не удалось скопировать. Пожалуйста, скопируйте вручную.",
+    "socialDocs": "Официальная документация",
+    "socialTitle": "Подписывайтесь",
+    "socialGithub": "Репозиторий GitHub — поставьте звезду!",
+    "socialX": "X (Twitter) @ZPeng31310",
+    "socialZhihu": "Zhihu @vscodeai",
+    "socialXiaohongshu": "Xiaohongshu (RED)",
+    "socialDouyin": "Douyin — наведите, чтобы сканировать и подписаться",
+    "socialYoutube": "YouTube-канал",
+    "douyinQrAlt": "QR-код Douyin",
+    "douyinId": "Douyin ID: nengyongai",
+    "douyinCopied": "Douyin ID скопирован в буфер обмена",
+    "douyinCopyFailed": "Не удалось скопировать. Пожалуйста, скопируйте вручную.",
     "sponsor": "Поддержать проект",
     "sponsorDesc": "Если этот проект вам полезен, поддержите его развитие!",
     "alipay": "Alipay",
@@ -894,7 +900,11 @@
       "listTitle": "Локальные CLI-инструменты",
       "summary": "{{installed}} / {{total}} установлено",
       "moreComingSoon": "Скоро будет больше",
-      "copyPath": "Копировать путь"
+      "copyPath": "Копировать путь",
+      "visibility": {
+        "hide": "Скрыть в меню выбора провайдера",
+        "show": "Показать в меню выбора провайдера"
+      }
     }
   },
   "history": {

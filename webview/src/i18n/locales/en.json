@@ -106,8 +106,7 @@
     "retrySdkStatus": "Retry",
     "openSourceBanner": "This project is guaranteed to be 100% open source and free (beware of pirated projects)",
     "openSourceBannerStar": "Star",
-    "openSourceBannerStarToast": "Repo link copied to clipboard — paste it in your browser to visit ⭐",
-    "openSourceBannerStarAria": "Copy repository link and star on GitHub",
+    "openSourceBannerStarAria": "Open the repository on GitHub and star it",
     "goInstallSdk": "Go to Install",
     "sdkTooLowForFable": "Claude SDK version is too low for the Fable model. Update the Claude Code SDK in Settings.",
     "updateSdk": "Update SDK",
@@ -680,6 +679,10 @@
       "summary": "{{installed}} / {{total}} installed",
       "moreComingSoon": "More coming soon",
       "copyPath": "Copy path",
+      "visibility": {
+        "hide": "Hide in provider switcher",
+        "show": "Show in provider switcher"
+      },
       "dsh": {
         "groupTitle": "DeepSeek Harness",
         "cliRowTitle": "CLI install",
@@ -885,11 +888,18 @@
     "versionHistoryDesc": "View all version update records",
     "communityQrTip": "Scan with WeChat to join the community",
     "communityQrAlt": "Official WeChat community QR code",
-    "githubTitle": "GitHub Repository",
-    "githubDesc": "This project is open source on GitHub. Star us to show your support!",
-    "githubCopyBtn": "Copy Repository URL",
-    "githubCopied": "Repository URL copied to clipboard. Please visit it in your browser.",
-    "githubCopyFailed": "Failed to copy. Please copy manually.",
+    "socialDocs": "Official Documentation",
+    "socialTitle": "Follow Us",
+    "socialGithub": "GitHub repository — star us!",
+    "socialX": "X (Twitter) @ZPeng31310",
+    "socialZhihu": "Zhihu @vscodeai",
+    "socialXiaohongshu": "Xiaohongshu (RED)",
+    "socialDouyin": "Douyin — hover to scan and follow",
+    "socialYoutube": "YouTube channel",
+    "douyinQrAlt": "Douyin QR code",
+    "douyinId": "Douyin ID: nengyongai",
+    "douyinCopied": "Douyin ID copied to clipboard",
+    "douyinCopyFailed": "Failed to copy. Please copy manually.",
     "sponsor": "Sponsor",
     "sponsorDesc": "If this project helps you, consider sponsoring to support ongoing maintenance!",
     "alipay": "Alipay",
@@ -2198,7 +2208,8 @@
     },
     "dsh": {
       "label": "DeepSeek Harness"
-    }
+    },
+    "manageCli": "CLI Settings"
   },
   "promptEnhancer": {
     "title": "Prompt Enhancer",

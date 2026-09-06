@@ -89,8 +89,7 @@
     "retrySdkStatus": "重試",
     "openSourceBanner": "本專案保證100%開源和免費（謹防盜版項目）",
     "openSourceBannerStar": "點個 Star",
-    "openSourceBannerStarToast": "已複製倉庫地址到剪貼簿，複製到瀏覽器即可訪問 ⭐",
-    "openSourceBannerStarAria": "複製倉庫地址並前往 GitHub 點 Star",
+    "openSourceBannerStarAria": "前往 GitHub 點 Star",
     "goInstallSdk": "前往安裝",
     "commandNotImplemented": "`{{command}}` 功能尚未實現。",
     "clearCommandDescription": "清除對話歷史並新建會話",
@@ -523,11 +522,18 @@
     "communityDesc": "掃描下方二維碼加入官方微信交流群，獲取最新資訊和技術支援",
     "communityQrTip": "使用微信掃一掃加入交流群",
     "communityQrAlt": "官方微信交流群二維碼",
-    "githubTitle": "GitHub 開源地址",
-    "githubDesc": "本專案已在 GitHub 開源，歡迎 Star 支持",
-    "githubCopyBtn": "複製開源地址",
-    "githubCopied": "開源地址已複製到剪貼簿，請在瀏覽器中訪問",
-    "githubCopyFailed": "複製失敗，請手動複製",
+    "socialDocs": "官方文檔",
+    "socialTitle": "關注我們",
+    "socialGithub": "GitHub 開源倉庫，歡迎 Star",
+    "socialX": "X（Twitter）@ZPeng31310",
+    "socialZhihu": "知乎 @vscodeai",
+    "socialXiaohongshu": "小紅書",
+    "socialDouyin": "抖音，滑鼠懸停掃碼關注",
+    "socialYoutube": "YouTube 頻道 @昆鹏马上优化",
+    "douyinQrAlt": "抖音二維碼",
+    "douyinId": "抖音號：nengyongai",
+    "douyinCopied": "抖音號已複製到剪貼簿",
+    "douyinCopyFailed": "複製失敗，請手動複製",
     "sponsor": "贊助支持",
     "sponsorDesc": "如果這個項目對你有幫助，歡迎贊助支持，你的支持是我持續維護的動力！",
     "alipay": "支付寶",
@@ -892,6 +898,10 @@
       "summary": "{{installed}} / {{total}} 已安裝",
       "moreComingSoon": "即將支援更多",
       "copyPath": "複製路徑",
+      "visibility": {
+        "hide": "在切換選單中隱藏",
+        "show": "在切換選單中顯示"
+      },
       "dsh": {
         "groupTitle": "DeepSeek Harness",
         "cliRowTitle": "CLI 安裝",
@@ -1742,7 +1752,8 @@
     },
     "dsh": {
       "label": "DeepSeek Harness"
-    }
+    },
+    "manageCli": "CLI 設定管理"
   },
   "promptEnhancer": {
     "title": "Prompt Enhancer",

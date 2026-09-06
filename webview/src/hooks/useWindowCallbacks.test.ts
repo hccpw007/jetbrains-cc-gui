@@ -1973,6 +1973,46 @@ describe('useWindowCallbacks integration', () => {
       });
     });
 
+    it('defers delta rendering until a pending structural snapshot is processed', () => {
+      vi.useFakeTimers();
+      const rafCallbacks: FrameRequestCallback[] = [];
+      let nextRafId = 0;
+      vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+        rafCallbacks.push(callback);
+        nextRafId += 1;
+        return nextRafId;
+      });
+      vi.stubGlobal('cancelAnimationFrame', vi.fn());
+
+      const opts = createOptions();
+      renderHook(() => useWindowCallbacks(opts));
+
+      act(() => {
+        window.onStreamStart!();
+        window.updateMessages!(JSON.stringify([
+          {
+            type: 'assistant',
+            content: 'snapshot',
+            raw: {
+              message: {
+                content: [{ type: 'tool_use', id: 'tool-1', name: 'Bash', input: { command: 'ls' } }],
+              },
+            },
+          },
+        ]), 1);
+        window.onContentDelta!('delta-after-snapshot');
+      });
+
+      expect(opts.streamingContentRef.current).toBe('delta-after-snapshot');
+      expect(rafCallbacks).toHaveLength(0);
+
+      act(() => {
+        vi.advanceTimersByTime(16);
+      });
+
+      expect(rafCallbacks).toHaveLength(2);
+    });
+
     it('onBlockReset keeps streaming refs cumulative across turns (single assistant message)', () => {
       stubSynchronousTimers();
 

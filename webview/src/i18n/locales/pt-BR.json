@@ -89,8 +89,7 @@
     "retrySdkStatus": "Tentar novamente",
     "openSourceBanner": "Este projeto é garantidamente 100% open source e gratuito (cuidado com projetos piratas)",
     "openSourceBannerStar": "Star",
-    "openSourceBannerStarToast": "Link copiado para a área de transferência — cole no navegador para acessar ⭐",
-    "openSourceBannerStarAria": "Copiar link e dar uma estrela no GitHub",
+    "openSourceBannerStarAria": "Abrir o repositório no GitHub e dar uma estrela",
     "goInstallSdk": "Ir para Instalação",
     "commandNotImplemented": "O recurso `{{command}}` ainda não foi implementado.",
     "clearCommandDescription": "Limpar histórico de conversa e iniciar uma nova sessão",
@@ -560,11 +559,18 @@
     "versionHistoryDesc": "Visualizar todos os registros de atualização de versão",
     "communityQrTip": "Escaneie com o WeChat para entrar na comunidade",
     "communityQrAlt": "QR code da comunidade oficial do WeChat",
-    "githubTitle": "Repositório GitHub",
-    "githubDesc": "Este projeto é open source no GitHub. Dê uma estrela para mostrar seu apoio!",
-    "githubCopyBtn": "Copiar URL do Repositório",
-    "githubCopied": "URL do repositório copiada. Por favor, acesse em seu navegador.",
-    "githubCopyFailed": "Falha ao copiar. Por favor, copie manualmente.",
+    "socialDocs": "Documentação oficial",
+    "socialTitle": "Siga-nos",
+    "socialGithub": "Repositório GitHub — dê uma estrela!",
+    "socialX": "X (Twitter) @ZPeng31310",
+    "socialZhihu": "Zhihu @vscodeai",
+    "socialXiaohongshu": "Xiaohongshu (RED)",
+    "socialDouyin": "Douyin — passe o mouse para escanear e seguir",
+    "socialYoutube": "Canal do YouTube",
+    "douyinQrAlt": "QR code do Douyin",
+    "douyinId": "ID do Douyin: nengyongai",
+    "douyinCopied": "ID do Douyin copiado para a área de transferência",
+    "douyinCopyFailed": "Falha ao copiar. Por favor, copie manualmente.",
     "sponsor": "Patrocinar",
     "sponsorDesc": "Se este projeto te ajudou, considere patrocinar para apoiar a manutenção contínua!",
     "alipay": "Alipay",
@@ -1029,7 +1035,11 @@
       "listTitle": "Ferramentas CLI locais",
       "summary": "{{installed}} / {{total}} instaladas",
       "moreComingSoon": "Em breve, mais suporte",
-      "copyPath": "Copiar caminho"
+      "copyPath": "Copiar caminho",
+      "visibility": {
+        "hide": "Ocultar no seletor de provedor",
+        "show": "Mostrar no seletor de provedor"
+      }
     }
   },
   "history": {

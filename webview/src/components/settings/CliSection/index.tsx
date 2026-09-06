@@ -4,6 +4,8 @@ import { ProviderModelIcon } from '../../shared/ProviderModelIcon';
 import { copyToClipboard } from '../../../utils/copyUtils';
 import { openBrowser } from '../../../utils/bridge';
 import DshConnectionCard from './DshConnectionCard';
+import { useHiddenCliProviders } from '../../../hooks/useCliProviderVisibility';
+import { setCliProviderHidden } from '../../../utils/cliProviderVisibility';
 import {
   CLI_TOOL_DEFINITIONS,
   type CliStatusMap,
@@ -22,6 +24,9 @@ interface CliToolCardProps {
   status?: CliToolStatus;
   onOpenInstall: (id: CliToolId) => void;
   onOpenDocs: (url: string) => void;
+  /** Hidden from the provider switcher dropdown */
+  switcherHidden: boolean;
+  onToggleSwitcherVisibility: (id: CliToolId, hidden: boolean) => void;
   /** Nested inside a product group — show a role label instead of repeating the product name. */
   nested?: boolean;
   displayName?: string;
@@ -32,6 +37,8 @@ const CliToolCard = ({
   status,
   onOpenInstall,
   onOpenDocs,
+  switcherHidden,
+  onToggleSwitcherVisibility,
   nested = false,
   displayName,
 }: CliToolCardProps) => {
@@ -48,10 +55,13 @@ const CliToolCard = ({
   const howToInstallLabel = t('settings.cli.howToInstall');
   const openDocsLabel = t('settings.cli.installDialog.openDocs');
   const name = displayName ?? t(tool.nameKey);
+  const visibilityLabel = switcherHidden
+    ? t('settings.cli.visibility.show', { defaultValue: 'Show in provider switcher' })
+    : t('settings.cli.visibility.hide', { defaultValue: 'Hide in provider switcher' });
 
   return (
     <div
-      className={`${styles.cliCard} ${installed ? styles.installed : styles.missing} ${nested ? styles.nestedCard : ''}`}
+      className={`${styles.cliCard} ${installed ? styles.installed : styles.missing} ${nested ? styles.nestedCard : ''} ${switcherHidden ? styles.switcherHidden : ''}`}
     >
       <div className={styles.cliMain} title={metaTitle}>
         <div className={styles.cliIcon}>
@@ -73,6 +83,17 @@ const CliToolCard = ({
       </div>
 
       <div className={styles.cliActions}>
+        <button
+          type="button"
+          className={styles.iconBtn}
+          onClick={() => onToggleSwitcherVisibility(tool.id, !switcherHidden)}
+          data-tooltip={visibilityLabel}
+          title={visibilityLabel}
+          aria-label={visibilityLabel}
+          aria-pressed={switcherHidden}
+        >
+          <span className={`codicon ${switcherHidden ? 'codicon-eye-closed' : 'codicon-eye'}`} />
+        </button>
         {installed ? (
           <>
             <span className={`${styles.statusBadge} ${styles.ok}`}>
@@ -300,6 +321,7 @@ const CliSection = ({ addToast }: CliSectionProps) => {
   const [installTool, setInstallTool] = useState<CliToolDefinition | null>(null);
   const addToastRef = useRef(addToast);
   const statusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hiddenProviders = useHiddenCliProviders();
 
   useEffect(() => {
     addToastRef.current = addToast;
@@ -364,6 +386,9 @@ const CliSection = ({ addToast }: CliSectionProps) => {
 
   const openDocs = useCallback((url: string) => {
     openBrowser(url);
+  }, []);
+  const toggleSwitcherVisibility = useCallback((id: CliToolId, hidden: boolean) => {
+    setCliProviderHidden(id, hidden);
   }, []);
 
   const { installedCount, totalCount, hasStatus } = useMemo(() => {
@@ -437,6 +462,8 @@ const CliSection = ({ addToast }: CliSectionProps) => {
                   status={statusMap[tool.id]}
                   onOpenInstall={openInstallGuide}
                   onOpenDocs={openDocs}
+                  switcherHidden={hiddenProviders.has(tool.id)}
+                  onToggleSwitcherVisibility={toggleSwitcherVisibility}
                 />
               );
             }
@@ -467,6 +494,8 @@ const CliSection = ({ addToast }: CliSectionProps) => {
                   status={statusMap[tool.id]}
                   onOpenInstall={openInstallGuide}
                   onOpenDocs={openDocs}
+                  switcherHidden={hiddenProviders.has(tool.id)}
+                  onToggleSwitcherVisibility={toggleSwitcherVisibility}
                   nested
                   displayName={t('settings.cli.dsh.cliRowTitle')}
                 />

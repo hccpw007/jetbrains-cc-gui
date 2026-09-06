@@ -48,7 +48,17 @@
 }
 
 .model-config-dropdown {
-  min-width: 220px;
+  min-width: 280px;
+}
+/* Flat inline model list inside the model-config popover (no own chrome) */
+.model-selector-inline {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.model-selector-list--inline {
+  max-height: 260px;
 }
 
 .runtime-provider-name {
@@ -213,6 +223,51 @@
 
 .provider-option-trailing .check-mark {
   margin-left: 0;
+}
+/* Provider switcher: hairline separators between rows */
+.provider-dropdown .selector-option + .selector-option {
+  border-top: 1px solid var(--dropdown-border);
+}
+
+/* Active provider indicator: compact dot instead of a check icon */
+.provider-active-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--success-color);
+  flex-shrink: 0;
+}
+/* Footer entry: jump to CLI management (Settings → Providers → CLI) */
+.provider-cli-footer {
+  border-top: 1px solid var(--dropdown-border);
+  margin-top: 4px;
+  padding: 6px 6px 2px;
+}
+
+.provider-cli-footer-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  padding: 5px 12px;
+  border: 1px solid var(--dropdown-border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+}
+
+.provider-cli-footer-btn:hover {
+  background: var(--dropdown-hover);
+  color: var(--text-primary);
+}
+
+.provider-cli-footer-btn .codicon {
+  font-size: 13px;
 }
 
 /* Beta tag for experimental CLI providers (Grok / Kimi / OpenCode / PI) */

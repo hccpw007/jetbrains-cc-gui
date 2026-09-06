@@ -106,7 +106,7 @@ class HistoryExportService {
                                             "  console.error('[Backend->Frontend] onExportSessionData not available!'); " +
                                             "}";
 
-                    context.executeJavaScriptOnEDT(jsCode);
+                    context.executeJavaScriptQueued(jsCode);
                 });
 
                 LOG.info("[HistoryHandler] ========== 导出会话完成 ==========");
@@ -118,7 +118,7 @@ class HistoryExportService {
                     String jsCode = "if (window.addToast) { " +
                                             "  window.addToast('导出失败: " + context.escapeJs(e.getMessage() != null ? e.getMessage() : "未知错误") + "', 'error'); " +
                                             "}";
-                    context.executeJavaScriptOnEDT(jsCode);
+                    context.executeJavaScriptQueued(jsCode);
                 });
             }
         });
