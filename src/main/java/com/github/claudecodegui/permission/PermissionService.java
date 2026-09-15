@@ -22,7 +22,6 @@ public class PermissionService {
     private final Path permissionDir;
     private final String sessionId;
     private final Gson gson = new Gson();
-    private volatile long lastActivityTime = System.currentTimeMillis();
     private volatile PermissionDecisionListener decisionListener;
 
     private static final int DIALOG_SHOWER_POLL_INTERVAL_MS = 100;
@@ -215,7 +214,6 @@ public class PermissionService {
     }
 
     public void start() {
-        this.lastActivityTime = System.currentTimeMillis();
         requestWatcher.start(new PermissionRequestWatcher.RequestHandler() {
             @Override
             public void handlePermissionRequest(Path requestFile) {
@@ -241,21 +239,16 @@ public class PermissionService {
     /**
      * Stops the watcher and purges every leftover IPC file for this session.
      *
-     * <p>Used only on explicit session close (window/tab disposed). Once the
-     * watcher stops it can no longer consume files, so any request that Node
-     * still holds — an AskUserQuestion issued from a background task after the
-     * tab was closed, for example — would otherwise stay orphaned forever and
-     * make the dialog silently never appear. Idle-timeout cleanup keeps using
-     * plain {@link #stop()} so files of a still-alive session are never wiped.
+     * <p>Used only on explicit session close (window/tab disposed), the sole point
+     * at which an instance is dropped. Once the watcher stops it can no longer
+     * consume files, so any request that Node still holds — an AskUserQuestion
+     * issued from a background task after the tab was closed, for example — would
+     * otherwise stay orphaned forever and make the dialog silently never appear.
      */
     void stopAndCleanupFiles() {
         requestWatcher.stop();
         fileProtocol.cleanupSessionFiles();
         LOG.info("[PERM_CLOSE] Stopped and purged leftover IPC files for sessionId=" + sessionId);
-    }
-
-    long getLastActivityTime() {
-        return lastActivityTime;
     }
 
     // ── Common Helpers ─────────────────────────────────────────────────
@@ -328,8 +321,6 @@ public class PermissionService {
 
     private void handlePermissionRequest(Path requestFile) {
         String fileName = requestFile.getFileName().toString();
-        long startTime = System.currentTimeMillis();
-        this.lastActivityTime = startTime;
 
         String content = acquireRequestContent(requestFile, "PERM");
         if (content == null) { return; }

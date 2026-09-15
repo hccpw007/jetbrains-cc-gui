@@ -2,27 +2,28 @@ package com.github.claudecodegui.permission;
 
 import com.intellij.openapi.diagnostic.Logger;
 
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
 /**
- * Tracks PermissionService instances by session id and cleans up stale sessions.
+ * Tracks PermissionService instances by session id.
+ *
+ * <p>实例生命周期完全跟随窗口/标签页：窗口初始化时创建并启动，窗口销毁时由调用方
+ * 显式 {@link #removeInstance(String)} 移除。此处刻意不做基于时间的"空闲回收"：
+ * 会话长时间静默（用户离开数小时乃至过夜）是常态，而 Node 侧常驻 daemon 始终持有
+ * 创建时的 sessionId 写权限 IPC 文件。一旦实例被判空闲回收，其 watcher 停止、且
+ * 没有任何路径能把它重新创建回来（重建只发生在窗口初始化时），该会话的
+ * AskUserQuestion 请求文件将无人消费 —— 对话框永久不再弹出。
  */
 class PermissionSessionRegistry {
 
     private static final Logger LOG = Logger.getInstance(PermissionSessionRegistry.class);
-    private static final long SESSION_CLEANUP_INTERVAL_MS = TimeUnit.HOURS.toMillis(1);
-    private static final long SESSION_MAX_IDLE_TIME_MS = TimeUnit.HOURS.toMillis(24);
 
     private static PermissionService legacyInstance;
     private static final Map<String, PermissionService> INSTANCES_BY_SESSION_ID = new ConcurrentHashMap<>();
-    private static volatile long lastCleanupTime = System.currentTimeMillis();
 
     private PermissionSessionRegistry() {
     }
@@ -32,8 +33,6 @@ class PermissionSessionRegistry {
             Supplier<PermissionService> legacyFactory,
             Function<String, PermissionService> sessionFactory
     ) {
-        cleanupStaleInstancesIfNeeded();
-
         if (sessionId == null || sessionId.isEmpty()) {
             if (legacyInstance == null) {
                 legacyInstance = legacyFactory.get();
@@ -56,11 +55,11 @@ class PermissionSessionRegistry {
     /**
      * Removes the session instance and stops its watcher.
      *
-     * @return the removed {@link PermissionService}, or null if the session was
-     *         not registered. Returning the instance lets callers that own an
-     *         explicit close path (e.g. window disposal) purge leftover IPC files
-     *         afterwards; idle-timeout cleanup ignores the return value on purpose
-     *         so files of a still-alive session are never wiped.
+     * <p>窗口/标签页关闭是本注册表唯一的移除入口，返回实例让调用方能顺带清理该
+     * session 遗留的 IPC 文件（见 {@link PermissionService#stopAndCleanupFiles()}）。
+     *
+     * @return the removed {@link PermissionService}, or null if the session was not
+     *         registered.
      */
     static synchronized PermissionService removeInstance(String sessionId) {
         if (sessionId == null || sessionId.isEmpty()) {
@@ -73,36 +72,6 @@ class PermissionSessionRegistry {
                     sessionId, INSTANCES_BY_SESSION_ID.size()));
         }
         return removed;
-    }
-
-    private static synchronized void cleanupStaleInstancesIfNeeded() {
-        long now = System.currentTimeMillis();
-        if (now - lastCleanupTime < SESSION_CLEANUP_INTERVAL_MS) {
-            return;
-        }
-
-        lastCleanupTime = now;
-        List<String> sessionsToRemove = new ArrayList<>();
-        for (Map.Entry<String, PermissionService> entry : INSTANCES_BY_SESSION_ID.entrySet()) {
-            PermissionService service = entry.getValue();
-            if (now - service.getLastActivityTime() > SESSION_MAX_IDLE_TIME_MS) {
-                LOG.info(String.format("Marking stale session for cleanup: %s (idle for %d hours)",
-                        entry.getKey(), (now - service.getLastActivityTime()) / TimeUnit.HOURS.toMillis(1)));
-                sessionsToRemove.add(entry.getKey());
-            }
-        }
-
-        for (String staleSessionId : sessionsToRemove) {
-            PermissionService service = INSTANCES_BY_SESSION_ID.remove(staleSessionId);
-            if (service != null) {
-                service.stop();
-            }
-        }
-
-        if (!sessionsToRemove.isEmpty()) {
-            LOG.info(String.format("Cleaned up %d stale session(s), remaining instances=%d",
-                    sessionsToRemove.size(), INSTANCES_BY_SESSION_ID.size()));
-        }
     }
 
     static String newLegacySessionId() {
