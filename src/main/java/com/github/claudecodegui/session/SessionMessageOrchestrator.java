@@ -215,6 +215,12 @@ public class SessionMessageOrchestrator {
                     }
                 }
 
+                // Rebuild per-turn token/cost metadata the transcript does not persist, so
+                // reloaded turns keep their token/price footer. Runs before the lock: the
+                // list is thread-local and the walk must not extend the lock window.
+                TurnPricingBackfill.backfill(loadedMessages, requestedProvider,
+                        PricingModelResolver.resolve(state.getModel()));
+
                 List<ClaudeSession.Message> callbackMessages;
                 // Measure the freshly parsed history before taking the state lock:
                 // the list is thread-local to this load, so its structural walk must
@@ -430,6 +436,10 @@ public class SessionMessageOrchestrator {
                         }
                     }
                 }
+                // Rebuild per-turn token/cost metadata for this page (see loadFromServer);
+                // the page arrives with no live-settled values, so every turn here is a candidate.
+                TurnPricingBackfill.backfill(newMessages, "claude",
+                        PricingModelResolver.resolve(state.getModel()));
 
                 boolean cursorReset = page.has("cursorReset") && page.get("cursorReset").getAsBoolean();
                 claudeHistoryFromTurn = page.get("fromTurn").getAsInt();

@@ -2,7 +2,6 @@ package com.github.claudecodegui.session;
 
 import com.github.claudecodegui.session.ClaudeSession.Message;
 import com.github.claudecodegui.handler.SettingsHandler;
-import com.github.claudecodegui.handler.provider.ModelProviderHandler;
 import com.github.claudecodegui.notifications.ClaudeNotifier;
 import com.github.claudecodegui.provider.common.MessageCallback;
 import com.github.claudecodegui.settings.CodemossSettingsService;
@@ -657,23 +656,12 @@ public class ClaudeMessageHandler implements MessageCallback {
      * Resolve the model that should be billed for this turn.
      *
      * <p>The chat UI selects Claude slot IDs (e.g. {@code claude-sonnet-4-6[1m]}), which the
-     * active provider's env maps to real model IDs (e.g. {@code deepseek-v4-flash}) before the
-     * request reaches the API. Pricing must use the real ID — otherwise a custom price configured
-     * for the mapped model is never matched and the turn is billed at built-in Claude rates.
-     * Resolution prefers the {@code *_MODEL_NAME} entry (real routed model), falling back to the
-     * {@code *_MODEL} slot mapping, so local settings written by proxies (cc-switch) that keep the
-     * slot id in {@code *_MODEL} still bill at the custom real-model rate.
+     * active provider's env maps to real model IDs before the request reaches the API.
+     * Delegates to {@link PricingModelResolver} so the live settlement and the history
+     * reload backfill ({@link TurnPricingBackfill}) always price the same model.
      */
     private String resolvePricingModel(String model) {
-        try {
-            JsonObject claudeSettings = settingsService.readClaudeSettings();
-            if (claudeSettings != null && claudeSettings.has("env") && claudeSettings.get("env").isJsonObject()) {
-                return ModelProviderHandler.resolveConfiguredClaudeModelForPricing(model, claudeSettings.getAsJsonObject("env"));
-            }
-        } catch (Exception e) {
-            LOG.warn("Failed to resolve pricing model: " + e.getMessage());
-        }
-        return model;
+        return PricingModelResolver.resolve(model, settingsService);
     }
 
     /**
