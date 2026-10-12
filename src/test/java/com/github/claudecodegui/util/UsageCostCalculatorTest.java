@@ -9,6 +9,8 @@ import org.junit.Test;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
@@ -117,6 +119,33 @@ public class UsageCostCalculatorTest {
     }
 
     @Test
+    public void pricesTimeBasedModelAtTheBillingInstant() throws Exception {
+        Path config = Files.createTempFile("pricing-time-based", ".json");
+        Files.writeString(config, "{\"customModelPricing\":{\"claude\":{\"deepseek-v4-flash\":{"
+                + "\"inputCostPer1M\":0.14,\"outputCostPer1M\":0.28,\"cacheReadCostPer1M\":0.0028,"
+                + "\"timeBasedPricing\":{"
+                + "\"peakWindowsUtc\":[{\"weekdays\":[1,2,3,4,5],\"startHour\":1,\"endHour\":4}],"
+                + "\"peak\":{\"inputCostPer1M\":0.30,\"outputCostPer1M\":1.20,\"cacheReadCostPer1M\":0.006},"
+                + "\"offPeak\":{\"inputCostPer1M\":0.15,\"outputCostPer1M\":0.60,\"cacheReadCostPer1M\":0.003}}}}}}");
+        CustomPricingProvider.setInstanceForTests(CustomPricingProvider.createForTests(config));
+        try {
+            JsonObject usage = new JsonObject();
+            usage.addProperty("input_tokens", 1_000_000);
+            usage.addProperty("output_tokens", 1_000_000);
+
+            // Monday 02:00 UTC is inside the peak window: 1M × 0.30 + 1M × 1.20 = 1.50
+            assertEquals(1.50, UsageCostCalculator.calculateTurnCostUsd(
+                    "claude", usage, "deepseek-v4-flash", utc(2026, 10, 12, 2, 0)), 1e-9);
+            // Monday 12:00 UTC is off-peak: 1M × 0.15 + 1M × 0.60 = 0.75
+            assertEquals(0.75, UsageCostCalculator.calculateTurnCostUsd(
+                    "claude", usage, "deepseek-v4-flash", utc(2026, 10, 12, 12, 0)), 1e-9);
+        } finally {
+            CustomPricingProvider.setInstanceForTests(null);
+            Files.deleteIfExists(config);
+        }
+    }
+
+    @Test
     public void returnsNullWhenNoBuiltInOrCustomPriceMatches() {
         JsonObject usage = new JsonObject();
         usage.addProperty("input_tokens", 1200);
@@ -125,5 +154,12 @@ public class UsageCostCalculatorTest {
         assertNull(UsageCostCalculator.calculateTurnCostUsd("claude", usage, "custom-claude-without-pricing"));
         assertNull(UsageCostCalculator.calculateTurnCostUsd("codex", usage, "custom-codex-without-pricing"));
         assertNull(UsageCostCalculator.calculateTurnCostUsd("codex", usage, null));
+    }
+
+    /** Build an epoch-millis instant from UTC wall-clock parts. */
+    private static long utc(int year, int month, int day, int hour, int minute) {
+        return ZonedDateTime.of(year, month, day, hour, minute, 0, 0, ZoneOffset.UTC)
+                .toInstant()
+                .toEpochMilli();
     }
 }

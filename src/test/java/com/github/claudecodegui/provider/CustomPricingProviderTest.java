@@ -10,10 +10,13 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Optional;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNotSame;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
@@ -95,6 +98,38 @@ public class CustomPricingProviderTest {
         Optional<ModelPricing> pricing = provider.getPricing("claude", "pa/gpt-5.5");
 
         assertTrue(pricing.isEmpty());
+    }
+
+    @Test
+    public void shouldParseTimeBasedPricingAndIgnoreUnusableBlocks() throws IOException {
+        CustomPricingProvider provider = newProvider(config(String.join(",",
+                "\"deepseek-v4-flash\": {\"inputCostPer1M\": 0.14, \"timeBasedPricing\": {"
+                        + "\"peakWindowsUtc\": [{\"weekdays\": [1,2,3,4,5], \"startHour\": 1, \"endHour\": 4}],"
+                        + "\"peak\": {\"inputCostPer1M\": 0.30},"
+                        + "\"offPeak\": {\"inputCostPer1M\": 0.15, \"cacheReadCostPer1M\": 0.003}}}",
+                // No valid peak window → block ignored, model keeps single-rate pricing.
+                "\"no-window-model\": {\"inputCostPer1M\": 1.0, \"timeBasedPricing\": {"
+                        + "\"peak\": {\"inputCostPer1M\": 2.0}}}",
+                // No tier carries a rate → block ignored.
+                "\"no-tier-model\": {\"inputCostPer1M\": 1.0, \"timeBasedPricing\": {"
+                        + "\"peakWindowsUtc\": [{\"weekdays\": [1], \"startHour\": 0, \"endHour\": 1}]}}"
+        )));
+
+        ModelPricing.TimeBasedPricing parsed = provider.getPricing("claude", "deepseek-v4-flash")
+                .orElseThrow()
+                .timeBasedPricing();
+
+        assertNotNull(parsed);
+        assertEquals(1, parsed.peakWindowsUtc().size());
+        assertEquals(List.of(1, 2, 3, 4, 5), parsed.peakWindowsUtc().get(0).weekdays());
+        assertEquals(1, parsed.peakWindowsUtc().get(0).startHour());
+        assertEquals(4, parsed.peakWindowsUtc().get(0).endHour());
+        assertEquals(0.30, parsed.peak().inputCostPer1M(), 1e-9);
+        assertNull(parsed.peak().outputCostPer1M());
+        assertEquals(0.003, parsed.offPeak().cacheReadCostPer1M(), 1e-9);
+
+        assertNull(provider.getPricing("claude", "no-window-model").orElseThrow().timeBasedPricing());
+        assertNull(provider.getPricing("claude", "no-tier-model").orElseThrow().timeBasedPricing());
     }
 
     private CustomPricingProvider newProvider(String configJson) throws IOException {

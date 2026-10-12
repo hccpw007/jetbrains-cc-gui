@@ -3,6 +3,7 @@ package com.github.claudecodegui.provider;
 import com.github.claudecodegui.settings.ConfigPathManager;
 import com.github.claudecodegui.settings.ModelPricing;
 import com.google.gson.Gson;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.intellij.openapi.diagnostic.Logger;
 
@@ -10,8 +11,10 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -196,7 +199,8 @@ public final class CustomPricingProvider {
                             readDouble(p, "inputCostPer1M"),
                             readDouble(p, "outputCostPer1M"),
                             readDouble(p, "cacheWriteCostPer1M"),
-                            readDouble(p, "cacheReadCostPer1M")
+                            readDouble(p, "cacheReadCostPer1M"),
+                            parseTimeBasedPricing(p)
                     );
                     modelMap.put(modelId, pricing);
                 }
@@ -222,6 +226,99 @@ public final class CustomPricingProvider {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    /**
+     * Parse a {@code timeBasedPricing} block from a model's pricing node, used by both the
+     * config-file loader and {@code CustomModelPricingHandler} so the two paths accept
+     * exactly the same shape:
+     * <pre>
+     * "timeBasedPricing": {
+     *   "peakWindowsUtc": [ { "weekdays": [1,2,3,4,5], "startHour": 1, "endHour": 4 } ],
+     *   "peak":    { "inputCostPer1M": 0.30, "outputCostPer1M": 1.20, ... },
+     *   "offPeak": { "inputCostPer1M": 0.15, "outputCostPer1M": 0.60, ... }
+     * }
+     * </pre>
+     * Returns null when the block is absent or unusable (no valid window, or neither tier
+     * carries a rate), so the model keeps its single-rate pricing.
+     */
+    public static ModelPricing.TimeBasedPricing parseTimeBasedPricing(JsonObject pricing) {
+        if (pricing == null || !pricing.has("timeBasedPricing") || !pricing.get("timeBasedPricing").isJsonObject()) {
+            return null;
+        }
+        JsonObject node = pricing.getAsJsonObject("timeBasedPricing");
+
+        List<ModelPricing.PeakWindow> windows = new ArrayList<>();
+        if (node.has("peakWindowsUtc") && node.get("peakWindowsUtc").isJsonArray()) {
+            for (JsonElement element : node.getAsJsonArray("peakWindowsUtc")) {
+                ModelPricing.PeakWindow window = parsePeakWindow(element);
+                if (window != null) {
+                    windows.add(window);
+                }
+            }
+        }
+        ModelPricing.Rates peak = parseRates(node, "peak");
+        ModelPricing.Rates offPeak = parseRates(node, "offPeak");
+        if (windows.isEmpty() || (peak == null && offPeak == null)) {
+            return null;
+        }
+        return new ModelPricing.TimeBasedPricing(List.copyOf(windows), peak, offPeak);
+    }
+
+    /** Parse one peak window; returns null when no valid weekday or hour bound remains. */
+    private static ModelPricing.PeakWindow parsePeakWindow(JsonElement element) {
+        if (element == null || !element.isJsonObject()) {
+            return null;
+        }
+        JsonObject window = element.getAsJsonObject();
+        List<Integer> weekdays = new ArrayList<>();
+        if (window.has("weekdays") && window.get("weekdays").isJsonArray()) {
+            for (JsonElement day : window.getAsJsonArray("weekdays")) {
+                // Skip non-numeric or out-of-range days; one valid weekday keeps the window usable
+                if (day.isJsonPrimitive() && day.getAsJsonPrimitive().isNumber()) {
+                    int value = day.getAsInt();
+                    if (value >= 1 && value <= 7 && !weekdays.contains(value)) {
+                        weekdays.add(value);
+                    }
+                }
+            }
+        }
+        Integer startHour = readInt(window, "startHour");
+        Integer endHour = readInt(window, "endHour");
+        if (weekdays.isEmpty() || startHour == null || endHour == null
+                || startHour < 0 || startHour > 23
+                || endHour < 0 || endHour > 24
+                || startHour.equals(endHour)) {
+            return null;
+        }
+        return new ModelPricing.PeakWindow(List.copyOf(weekdays), startHour, endHour);
+    }
+
+    /** Parse one rate tier; returns null when no dimension carries a valid price. */
+    private static ModelPricing.Rates parseRates(JsonObject node, String key) {
+        if (!node.has(key) || !node.get(key).isJsonObject()) {
+            return null;
+        }
+        JsonObject rates = node.getAsJsonObject(key);
+        Double input = readDouble(rates, "inputCostPer1M");
+        Double output = readDouble(rates, "outputCostPer1M");
+        Double cacheWrite = readDouble(rates, "cacheWriteCostPer1M");
+        Double cacheRead = readDouble(rates, "cacheReadCostPer1M");
+        if (input == null && output == null && cacheWrite == null && cacheRead == null) {
+            return null;
+        }
+        return new ModelPricing.Rates(input, output, cacheWrite, cacheRead);
+    }
+
+    private static Integer readInt(JsonObject obj, String key) {
+        if (obj == null || !obj.has(key) || obj.get(key).isJsonNull()) {
+            return null;
+        }
+        JsonElement element = obj.get(key);
+        if (!element.isJsonPrimitive() || !element.getAsJsonPrimitive().isNumber()) {
+            return null;
+        }
+        return element.getAsInt();
     }
 
     private static Optional<ModelPricing> findUniqueConfiguredContextSuffixPricing(

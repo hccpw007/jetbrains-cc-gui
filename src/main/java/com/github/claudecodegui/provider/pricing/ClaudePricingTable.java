@@ -1,7 +1,9 @@
 package com.github.claudecodegui.provider.pricing;
 
 import com.github.claudecodegui.provider.CustomPricingProvider;
+import com.github.claudecodegui.settings.ModelPricing;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -85,6 +87,85 @@ public final class ClaudePricingTable {
     public static ClaudePricing resolveOrDefault(String model) {
         ClaudePricing pricing = resolve(model);
         return pricing != null ? pricing : DEFAULT_PRICING;
+    }
+
+    /**
+     * Time-of-day pricing rule for {@code model}, or {@code null} when the model has no
+     * usable {@code timeBasedPricing} configuration (the common single-rate case).
+     *
+     * <p>Only user-configured pricing supports time tiers. A tier dimension left unset
+     * falls back to the model's resolved base rate ({@link #resolve}: custom top-level
+     * rate first, then its built-in rate). A config with no valid peak window, or with
+     * neither tier carrying any rate, is treated as "no schedule" rather than silently
+     * billing everything at off-peak.
+     */
+    public static TimeBasedPricing resolveSchedule(String model) {
+        if (model == null || model.isBlank()) {
+            return null;
+        }
+        ModelPricing custom = CustomPricingProvider.getInstance().getPricing("claude", model).orElse(null);
+        ModelPricing.TimeBasedPricing config = custom == null ? null : custom.timeBasedPricing();
+        if (config == null) {
+            return null;
+        }
+
+        List<TimeBasedPricing.PeakWindow> windows = new ArrayList<>();
+        if (config.peakWindowsUtc() != null) {
+            for (ModelPricing.PeakWindow window : config.peakWindowsUtc()) {
+                TimeBasedPricing.PeakWindow validated = toPeakWindow(window);
+                if (validated != null) {
+                    windows.add(validated);
+                }
+            }
+        }
+        if (windows.isEmpty() || (config.peak() == null && config.offPeak() == null)) {
+            return null;
+        }
+
+        ClaudePricing base = resolve(model);
+        if (base == null) {
+            return null;
+        }
+        return new TimeBasedPricing(
+                List.copyOf(windows),
+                toTierPricing(config.peak(), base),
+                toTierPricing(config.offPeak(), base));
+    }
+
+    /**
+     * Validate and convert a configured peak window, or {@code null} when it is unusable
+     * (no valid weekday, hour out of range, or an empty range). Unknown weekday values
+     * are dropped; the window survives as long as at least one valid weekday remains.
+     */
+    private static TimeBasedPricing.PeakWindow toPeakWindow(ModelPricing.PeakWindow window) {
+        if (window == null || window.weekdays() == null) {
+            return null;
+        }
+        List<Integer> weekdays = new ArrayList<>();
+        for (Integer day : window.weekdays()) {
+            if (day != null && day >= 1 && day <= 7 && !weekdays.contains(day)) {
+                weekdays.add(day);
+            }
+        }
+        if (weekdays.isEmpty()
+                || window.startHour() < 0 || window.startHour() > 23
+                || window.endHour() < 0 || window.endHour() > 24
+                || window.startHour() == window.endHour()) {
+            return null;
+        }
+        return new TimeBasedPricing.PeakWindow(List.copyOf(weekdays), window.startHour(), window.endHour());
+    }
+
+    /** Convert a configured tier into a concrete price, filling unset dimensions from {@code base}. */
+    private static ClaudePricing toTierPricing(ModelPricing.Rates rates, ClaudePricing base) {
+        if (rates == null) {
+            return base;
+        }
+        return new ClaudePricing(
+                rates.inputCostPer1M() != null ? rates.inputCostPer1M() : base.inputCostPer1M(),
+                rates.outputCostPer1M() != null ? rates.outputCostPer1M() : base.outputCostPer1M(),
+                rates.cacheWriteCostPer1M() != null ? rates.cacheWriteCostPer1M() : base.cacheWriteCostPer1M(),
+                rates.cacheReadCostPer1M() != null ? rates.cacheReadCostPer1M() : base.cacheReadCostPer1M());
     }
 
     private static ClaudePricing builtinFor(String model) {

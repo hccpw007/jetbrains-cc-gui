@@ -9,6 +9,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
@@ -84,6 +85,37 @@ public class CustomModelPricingHandlerTest {
         assertEquals("claude", settings.providerRef.get());
         assertEquals(0.2, settings.pricingRef.get().get("custom-claude").inputCostPer1M(), 0.000001);
         assertNull(settings.contextWindowsRef.get());
+    }
+
+    @Test
+    public void shouldParseTimeBasedPricingFromPayload() {
+        CapturingSettingsService settings = new CapturingSettingsService();
+        CustomModelPricingHandler handler = new CustomModelPricingHandler(null, settings);
+
+        boolean handled = handler.handle(CustomModelPricingHandler.SET_TYPE, """
+                {
+                  "provider": "claude",
+                  "models": [
+                    {
+                      "id": "deepseek-v4-flash",
+                      "pricing": {
+                        "inputCostPer1M": 0.14,
+                        "timeBasedPricing": {
+                          "peakWindowsUtc": [{"weekdays": [1,2,3,4,5], "startHour": 1, "endHour": 4}],
+                          "peak": {"inputCostPer1M": 0.30},
+                          "offPeak": {"inputCostPer1M": 0.15}
+                        }
+                      }
+                    }
+                  ]
+                }
+                """);
+
+        assertTrue(handled);
+        ModelPricing saved = settings.pricingRef.get().get("deepseek-v4-flash");
+        assertNotNull(saved.timeBasedPricing());
+        assertEquals(1, saved.timeBasedPricing().peakWindowsUtc().size());
+        assertEquals(0.30, saved.timeBasedPricing().peak().inputCostPer1M(), 1e-9);
     }
 
     @Test

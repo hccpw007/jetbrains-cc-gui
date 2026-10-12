@@ -11,6 +11,7 @@ import com.github.claudecodegui.session.SessionState;
 import com.github.claudecodegui.dependency.DependencyManager;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
@@ -2633,9 +2634,23 @@ public class CodemossSettingsService {
         if (pricing == null || pricing.isEmpty()) {
             root.remove(provider);
         } else {
+            JsonObject existingProvider = root.has(provider) && root.get(provider).isJsonObject()
+                    ? root.getAsJsonObject(provider)
+                    : null;
             JsonObject providerNode = new JsonObject();
             for (Map.Entry<String, ModelPricing> entry : pricing.entrySet()) {
-                providerNode.add(entry.getKey(), serializeModelPricing(entry.getValue()));
+                ModelPricing modelPricing = entry.getValue();
+                JsonObject node = serializeModelPricing(modelPricing);
+                // The frontend sync sends only the four base rates; a model arriving without
+                // timeBasedPricing inherits the block already stored in the config, so a UI
+                // price tweak cannot silently drop hand-edited time tiers.
+                if (modelPricing.timeBasedPricing() == null) {
+                    JsonElement inherited = inheritTimeBasedPricing(existingProvider, entry.getKey());
+                    if (inherited != null) {
+                        node.add("timeBasedPricing", inherited);
+                    }
+                }
+                providerNode.add(entry.getKey(), node);
             }
             root.add(provider, providerNode);
         }
@@ -2699,7 +2714,71 @@ public class CodemossSettingsService {
         if (isValidPrice(pricing.cacheReadCostPer1M())) {
             node.addProperty("cacheReadCostPer1M", pricing.cacheReadCostPer1M());
         }
+        if (pricing.timeBasedPricing() != null) {
+            node.add("timeBasedPricing", serializeTimeBasedPricing(pricing.timeBasedPricing()));
+        }
         return node;
+    }
+
+    /**
+     * Serialize a time-based pricing block in the shape consumed by
+     * {@link com.github.claudecodegui.provider.CustomPricingProvider#parseTimeBasedPricing}.
+     */
+    private static JsonObject serializeTimeBasedPricing(ModelPricing.TimeBasedPricing timeBasedPricing) {
+        JsonObject node = new JsonObject();
+        JsonArray windows = new JsonArray();
+        for (ModelPricing.PeakWindow window : timeBasedPricing.peakWindowsUtc()) {
+            JsonObject windowNode = new JsonObject();
+            JsonArray weekdays = new JsonArray();
+            for (Integer day : window.weekdays()) {
+                weekdays.add(day);
+            }
+            windowNode.add("weekdays", weekdays);
+            windowNode.addProperty("startHour", window.startHour());
+            windowNode.addProperty("endHour", window.endHour());
+            windows.add(windowNode);
+        }
+        node.add("peakWindowsUtc", windows);
+        if (timeBasedPricing.peak() != null) {
+            node.add("peak", serializeRates(timeBasedPricing.peak()));
+        }
+        if (timeBasedPricing.offPeak() != null) {
+            node.add("offPeak", serializeRates(timeBasedPricing.offPeak()));
+        }
+        return node;
+    }
+
+    private static JsonObject serializeRates(ModelPricing.Rates rates) {
+        JsonObject node = new JsonObject();
+        if (isValidPrice(rates.inputCostPer1M())) {
+            node.addProperty("inputCostPer1M", rates.inputCostPer1M());
+        }
+        if (isValidPrice(rates.outputCostPer1M())) {
+            node.addProperty("outputCostPer1M", rates.outputCostPer1M());
+        }
+        if (isValidPrice(rates.cacheWriteCostPer1M())) {
+            node.addProperty("cacheWriteCostPer1M", rates.cacheWriteCostPer1M());
+        }
+        if (isValidPrice(rates.cacheReadCostPer1M())) {
+            node.addProperty("cacheReadCostPer1M", rates.cacheReadCostPer1M());
+        }
+        return node;
+    }
+
+    /**
+     * Copy the stored {@code timeBasedPricing} block of {@code modelId}, or null when the
+     * config holds none. Keeps hand-edited time tiers alive across full-map pricing syncs.
+     */
+    private static JsonElement inheritTimeBasedPricing(JsonObject existingProvider, String modelId) {
+        if (existingProvider == null || modelId == null
+                || !existingProvider.has(modelId) || !existingProvider.get(modelId).isJsonObject()) {
+            return null;
+        }
+        JsonObject existingModel = existingProvider.getAsJsonObject(modelId);
+        if (!existingModel.has("timeBasedPricing") || !existingModel.get("timeBasedPricing").isJsonObject()) {
+            return null;
+        }
+        return existingModel.get("timeBasedPricing").deepCopy();
     }
 
     private static boolean isValidPrice(Double value) {

@@ -121,10 +121,14 @@ public class CustomModelPricingHandler extends BaseMessageHandler {
         Double output = readDouble(p, "outputCostPer1M");
         Double cacheWrite = readDouble(p, "cacheWriteCostPer1M");
         Double cacheRead = readDouble(p, "cacheReadCostPer1M");
-        if (input == null && output == null && cacheWrite == null && cacheRead == null) {
+        // Optional time-of-day tiers; parsed by the shared provider helper so this payload
+        // path and the config-file loader accept exactly the same shape.
+        ModelPricing.TimeBasedPricing timeBasedPricing = CustomPricingProvider.parseTimeBasedPricing(p);
+        if (input == null && output == null && cacheWrite == null && cacheRead == null
+                && timeBasedPricing == null) {
             return null;
         }
-        return new ModelPricing(input, output, cacheWrite, cacheRead);
+        return new ModelPricing(input, output, cacheWrite, cacheRead, timeBasedPricing);
     }
 
     private Integer parseContextWindow(JsonObject model) {

@@ -1,6 +1,12 @@
 package com.github.claudecodegui.provider.pricing;
 
+import com.github.claudecodegui.provider.CustomPricingProvider;
 import org.junit.Test;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
@@ -101,5 +107,50 @@ public class PricingTableTest {
         assertEquals(10.0, CodexPricingTable.resolve("gpt-6.1-sol").outputCostPer1M(), 1e-9);
         assertEquals(0.2, CodexPricingTable.resolve("gpt-6.1-sol").cacheReadCostPer1M(), 1e-9);
         assertEquals(2.0, CodexPricingTable.resolve("gpt-6.1-sol-2026-04-01").inputCostPer1M(), 1e-9);
+    }
+
+    @Test
+    public void claudeResolveScheduleBuildsTiersAndFallsBackToBaseRates() throws Exception {
+        Path config = Files.createTempFile("pricing-schedule", ".json");
+        Files.writeString(config, """
+                {"customModelPricing":{"claude":{"deepseek-v4-flash":{
+                  "inputCostPer1M":0.14,"outputCostPer1M":0.28,"cacheWriteCostPer1M":0.14,"cacheReadCostPer1M":0.0028,
+                  "timeBasedPricing":{
+                    "peakWindowsUtc":[{"weekdays":[1,2,3,4,5],"startHour":1,"endHour":4},
+                                      {"weekdays":[1,2,3,4,5],"startHour":6,"endHour":10}],
+                    "peak":{"inputCostPer1M":0.30,"outputCostPer1M":1.20},
+                    "offPeak":{"inputCostPer1M":0.15}}},
+                  "deepseek-v4-pro":{"inputCostPer1M":1.0}}}}
+                """);
+        CustomPricingProvider.setInstanceForTests(CustomPricingProvider.createForTests(config));
+        try {
+            TimeBasedPricing schedule = ClaudePricingTable.resolveSchedule("deepseek-v4-flash");
+            assertNotNull(schedule);
+
+            // Monday 02:00 UTC is inside the first peak window; Monday 12:00 is off-peak.
+            ClaudePricing peak = schedule.pricingAt(utc(2026, 10, 12, 2, 0));
+            ClaudePricing offPeak = schedule.pricingAt(utc(2026, 10, 12, 12, 0));
+            assertEquals(0.30, peak.inputCostPer1M(), 1e-9);
+            assertEquals(1.20, peak.outputCostPer1M(), 1e-9);
+            assertEquals(0.15, offPeak.inputCostPer1M(), 1e-9);
+            // Unset tier dimensions fall back to the model's base rates, not the other tier's.
+            assertEquals(0.14, peak.cacheWriteCostPer1M(), 1e-9);
+            assertEquals(0.0028, peak.cacheReadCostPer1M(), 1e-9);
+            assertEquals(0.28, offPeak.outputCostPer1M(), 1e-9);
+
+            // Models without a timeBasedPricing block keep the single-rate path.
+            assertNull(ClaudePricingTable.resolveSchedule("deepseek-v4-pro"));
+            assertNull(ClaudePricingTable.resolveSchedule("claude-sonnet-5"));
+        } finally {
+            CustomPricingProvider.setInstanceForTests(null);
+            Files.deleteIfExists(config);
+        }
+    }
+
+    /** Build an epoch-millis instant from UTC wall-clock parts. */
+    private static long utc(int year, int month, int day, int hour, int minute) {
+        return ZonedDateTime.of(year, month, day, hour, minute, 0, 0, ZoneOffset.UTC)
+                .toInstant()
+                .toEpochMilli();
     }
 }
