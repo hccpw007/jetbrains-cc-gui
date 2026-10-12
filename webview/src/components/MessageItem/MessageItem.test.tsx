@@ -315,7 +315,8 @@ describe('MessageItem token usage display', () => {
     renderMessageItem(message, { detailedOutputEnabled: true });
 
     expect(screen.getByText('0:16')).toBeTruthy();
-    expect(screen.getByText('输入 1.2K / 输出 456')).toBeTruthy();
+    // 详细输出下无缓存命中轮同样附带命中标签（格式与其他轮一致）
+    expect(screen.getByText('输入 1.2K（缓存命中 0，0.00%） / 输出 456')).toBeTruthy();
     // 详细输出下速度与费用共存于第一行
     expect(screen.getByText('29tokens/s')).toBeTruthy();
     expect(screen.getByText('$0.0060')).toBeTruthy();
@@ -348,6 +349,31 @@ describe('MessageItem token usage display', () => {
     expect(tokens.getAttribute('title')).toBe(
       '本轮合计 — 输入 37 · 缓存写入 0 · 缓存读取 36.3K · 输出 353'
     );
+  });
+
+  it('shows 0.00% cache hit ratio for turns without cache reads in detailed mode', () => {
+    // 新会话首次请求无缓存可读（cache_read 为 0）；详细输出下仍展示命中标签，
+    // 避免首轮与后续轮格式不一致
+    const message: ClaudeMessage = {
+      type: 'assistant',
+      content: 'Hello',
+      durationMs: 4000,
+      raw: {
+        message: {
+          content: [{ type: 'text', text: 'Hello' }],
+        },
+        turnUsage: {
+          input_tokens: 29624,
+          cache_creation_input_tokens: 0,
+          cache_read_input_tokens: 0,
+          output_tokens: 458,
+        },
+      } as any,
+    };
+
+    renderMessageItem(message, { detailedOutputEnabled: true });
+
+    expect(screen.getByText('输入 29.6K（缓存命中 0，0.00%） / 输出 458')).toBeTruthy();
   });
 
   it('hides cache hit ratio when detailed output is disabled', () => {

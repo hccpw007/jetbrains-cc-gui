@@ -75,10 +75,13 @@ function formatUsdCost(cost: number): string {
   return `$${cost.toFixed(2)}`;
 }
 
-function formatCacheHitRatio(tokenInfo: TokenUsageInfo): string | null {
-  if (tokenInfo.cacheReadTokens <= 0 || tokenInfo.inputTokens <= 0) return null;
+/** 格式化缓存命中率（两位小数）。无命中轮（如新会话首次请求）同样返回 "0.00%"，
+ *  保证详细输出下每轮 footer 格式一致；inputTokens 为 0 时按 0% 处理，避免除零。 */
+function formatCacheHitRatio(tokenInfo: TokenUsageInfo): string {
   // 用精确 token 数字计算，避免 "32.3K" 这类四舍五入值污染命中率
-  const ratio = (tokenInfo.cacheReadTokens / tokenInfo.inputTokens) * 100;
+  const ratio = tokenInfo.inputTokens > 0
+    ? (tokenInfo.cacheReadTokens / tokenInfo.inputTokens) * 100
+    : 0;
   return `${Math.min(100, Math.max(0, ratio)).toFixed(2)}%`;
 }
 
@@ -116,6 +119,7 @@ export const MessageDurationFooter = memo(function MessageDurationFooter({
   const cacheHitRatio = detailedOutputEnabled && tokenInfo ? formatCacheHitRatio(tokenInfo) : null;
   // 输出 token 生成速度始终显示（只要有耗时与输出 token），与耗时/用量一致
   const tokenSpeed = tokenInfo ? formatTokenSpeed(message.durationMs, tokenInfo.outputTokens) : null;
+  // 详细输出下始终附带缓存命中标签（无命中轮显示 0，保证每轮格式一致）
   const cacheHitLabel = tokenInfo && cacheHitRatio
     ? t('chat.cacheHitsWithRatio', {
       tokens: formatTokenCount(tokenInfo.cacheReadTokens),
