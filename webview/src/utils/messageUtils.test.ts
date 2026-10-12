@@ -418,6 +418,57 @@ describe('mergeConsecutiveAssistantMessages', () => {
     // (user tool_result is skipped, but assistant blocks stay separated)
     expect(result.filter((m) => m.type === 'assistant')).toHaveLength(2);
   });
+
+  // ---------------------------------------------------------------------------
+  // Turn-settlement fields — durationMs / turnUsage preservation across merging
+  // ---------------------------------------------------------------------------
+
+  it('preserves durationMs / turnUsage / turnCostUsd from the last merged fragment', () => {
+    const messages: ClaudeMessage[] = [
+      makeMsg('assistant', 'part1', {
+        __turnId: 2,
+        raw: { content: [{ type: 'text', text: 'part1' }] } as any,
+      }),
+      makeMsg('assistant', 'part2', {
+        __turnId: 2,
+        durationMs: 4200,
+        raw: {
+          content: [{ type: 'text', text: 'part2' }],
+          turnUsage: { input_tokens: 900, output_tokens: 120 },
+          turnCostUsd: 0.0123,
+        } as any,
+      }),
+    ];
+
+    const result = mergeConsecutiveAssistantMessages(messages, normalizeBlocks);
+    expect(result).toHaveLength(1);
+    expect(result[0].durationMs).toBe(4200);
+    const mergedRaw = result[0].raw as {
+      turnUsage?: { input_tokens?: number; output_tokens?: number };
+      turnCostUsd?: number;
+    };
+    expect(mergedRaw.turnUsage?.input_tokens).toBe(900);
+    expect(mergedRaw.turnUsage?.output_tokens).toBe(120);
+    expect(mergedRaw.turnCostUsd).toBe(0.0123);
+  });
+
+  it('does not add settlement fields when no merged fragment carries them', () => {
+    const messages: ClaudeMessage[] = [
+      makeMsg('assistant', 'part1', {
+        raw: { content: [{ type: 'text', text: 'part1' }] } as any,
+      }),
+      makeMsg('assistant', 'part2', {
+        raw: { content: [{ type: 'text', text: 'part2' }] } as any,
+      }),
+    ];
+
+    const result = mergeConsecutiveAssistantMessages(messages, normalizeBlocks);
+    expect(result).toHaveLength(1);
+    expect(result[0].durationMs).toBeUndefined();
+    const mergedRaw = result[0].raw as { turnUsage?: unknown; turnCostUsd?: unknown };
+    expect(mergedRaw.turnUsage).toBeUndefined();
+    expect(mergedRaw.turnCostUsd).toBeUndefined();
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -36,6 +36,7 @@ public class MessageJsonConverterTest {
         raw.addProperty("type", "assistant");
         raw.addProperty("sessionId", "session-1");
         raw.addProperty("parentUuid", "parent-1");
+        raw.addProperty("timestamp", "2026-01-02T03:04:05.000Z");
         raw.add("message", message);
         JsonObject turnUsage = new JsonObject();
         turnUsage.addProperty("input_tokens", 1200);
@@ -59,6 +60,9 @@ public class MessageJsonConverterTest {
         assertEquals("assistant", transportRaw.get("type").getAsString());
         assertFalse(transportRaw.has("sessionId"));
         assertFalse(transportRaw.has("parentUuid"));
+        // raw timestamp is transported so the frontend can rebuild durationMs
+        // for historical turns after a session reload
+        assertEquals("2026-01-02T03:04:05.000Z", transportRaw.get("timestamp").getAsString());
 
         // turnUsage (whole-turn aggregate) is transported for the per-turn token display
         assertTrue(transportRaw.has("turnUsage"));
@@ -68,10 +72,13 @@ public class MessageJsonConverterTest {
 
         JsonObject transportMessage = transportRaw.getAsJsonObject("message");
         assertTrue(transportMessage.has("content"));
-        assertFalse(transportMessage.has("id"));
+        // id + usage are transported for the frontend's whole-turn usage
+        // reconstruction (summed per turn, deduped by id) on history reload
+        assertTrue(transportMessage.has("id"));
+        assertEquals("msg-1", transportMessage.get("id").getAsString());
+        assertTrue(transportMessage.has("usage"));
+        assertEquals(321, transportMessage.getAsJsonObject("usage").get("input_tokens").getAsInt());
         assertFalse(transportMessage.has("model"));
-        // message.usage feeds the status bar only and must NOT be transported per message
-        assertFalse(transportMessage.has("usage"));
     }
 
     @Test

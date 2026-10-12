@@ -194,13 +194,18 @@ public class MessageJsonConverter {
         copyFieldIfPresent(raw, transport, "summarizeMetadata");
         // Origin field for distinguishing human input from synthetic messages
         copyFieldIfPresent(raw, transport, "origin");
+        // Transcript timestamp (ISO string) for the frontend's per-turn metadata
+        // reconstruction after a history reload: durationMs is rebuilt as
+        // (last assistant raw timestamp - prompt raw timestamp).
+        copyFieldIfPresent(raw, transport, "timestamp");
         // Whole-turn aggregated usage stamped by ClaudeMessageHandler.handleResult /
         // CodexMessageHandler.handleResultMessage, for the per-turn token display.
         // Whole-turn estimated cost is calculated by the backend from the same pricing
         // configuration used by Usage Statistics; the frontend only formats it.
-        // Deliberately NOT copying the top-level usage or message.usage fields:
-        // those carry per-call / session-cumulative values for the status bar and
-        // would be misleading if rendered per message.
+        // The top-level usage field is still NOT copied: it carries session-cumulative
+        // values for the status bar and would be misleading if rendered per message.
+        // (message.id / message.usage are copied below — the frontend rebuilds the
+        // same whole-turn aggregate from them after a history reload.)
         copyFieldIfPresent(raw, transport, "turnUsage");
         copyFieldIfPresent(raw, transport, "turnCostUsd");
         // Agent/Task tool metadata (agentId, totalDurationMs, totalTokens,
@@ -216,6 +221,13 @@ public class MessageJsonConverter {
         if (raw.has("message") && raw.get("message").isJsonObject()) {
             JsonObject sourceMessage = raw.getAsJsonObject("message");
             JsonObject transportMessage = new JsonObject();
+            // id + usage feed the frontend's turn-metadata reconstruction
+            // (turnMetadataReconstruction.ts): after a history reload the
+            // whole-turn usage is rebuilt by summing message.usage across the
+            // turn, deduped by message.id. These are per-call values, so the
+            // frontend must not render them per message (only aggregate them).
+            copyFieldIfPresent(sourceMessage, transportMessage, "id");
+            copyFieldIfPresent(sourceMessage, transportMessage, "usage");
             if (sourceMessage.has("content")) {
                 transportMessage.add("content", sourceMessage.get("content").deepCopy());
             }

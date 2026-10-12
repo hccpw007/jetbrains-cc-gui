@@ -19,8 +19,10 @@ import { hasTaskNotificationTag } from './contentBlockNormalize';
  *   (MessageItem.tsx) expects.
  *
  * Existing durationMs/turnUsage values are never overwritten, and missing
- * timestamps/usage are skipped silently (the current Java transport strips raw
- * timestamps and message.usage, so this lights up only when they are present).
+ * timestamps/usage are skipped silently. The Java transport
+ * (MessageJsonConverter.buildTransportRaw) preserves raw timestamp,
+ * message.id and message.usage for exactly this reconstruction, so every
+ * reloaded session gets its per-turn footer back.
  */
 
 interface ReconstructedTurnUsage {

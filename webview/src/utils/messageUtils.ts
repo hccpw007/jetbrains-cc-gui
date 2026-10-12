@@ -767,6 +767,12 @@ export function mergeConsecutiveAssistantMessages(
     const combinedBlocks: ClaudeContentBlock[] = [];
     const contentParts: string[] = [];
 
+    // 结算字段（耗时/整轮用量/费用）只 stamp 在该轮最后一条 assistant 片段上；
+    // 合并时若沿用 group[0]，整块"本次耗时 · tokens"footer 会随片段合并一起丢失。
+    let settledDurationMs: number | undefined;
+    let settledTurnUsage: unknown;
+    let settledTurnCostUsd: number | undefined;
+
     for (const msg of group) {
       const blocks = normalizeBlocksFn(msg.raw) || [];
       if (blocks.length > 0) {
@@ -778,6 +784,11 @@ export function mergeConsecutiveAssistantMessages(
           contentParts.push(msg.content);
         }
       }
+
+      if (typeof msg.durationMs === 'number') settledDurationMs = msg.durationMs;
+      const msgRaw = typeof msg.raw === 'object' && msg.raw ? (msg.raw as Record<string, unknown>) : null;
+      if (msgRaw?.turnUsage != null) settledTurnUsage = msgRaw.turnUsage;
+      if (typeof msgRaw?.turnCostUsd === 'number') settledTurnCostUsd = msgRaw.turnCostUsd;
     }
 
     const rawBase: ClaudeRawMessage =
@@ -787,6 +798,8 @@ export function mergeConsecutiveAssistantMessages(
       ...rawBase,
       content: combinedBlocks,
       message: rawBase.message ? { ...rawBase.message, content: combinedBlocks } : rawBase.message,
+      ...(settledTurnUsage != null ? { turnUsage: settledTurnUsage } : {}),
+      ...(settledTurnCostUsd !== undefined ? { turnCostUsd: settledTurnCostUsd } : {}),
     };
 
     const mergedContent = contentParts.join('\n');
@@ -796,6 +809,7 @@ export function mergeConsecutiveAssistantMessages(
       content: mergedContent,
       raw: nextRaw,
       __turnId: first.__turnId,
+      ...(settledDurationMs !== undefined ? { durationMs: settledDurationMs } : {}),
     };
   };
 

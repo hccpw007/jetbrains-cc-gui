@@ -101,7 +101,7 @@ interface MessageDurationFooterProps {
   t: TFunction;
 }
 
-/** Duration and token display after last assistant message */
+/** Duration and token display, rendered under every settled assistant message turn */
 export const MessageDurationFooter = memo(function MessageDurationFooter({
   message,
   isMessageStreaming,
