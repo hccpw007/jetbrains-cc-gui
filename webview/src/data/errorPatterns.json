@@ -1,6 +1,13 @@
 {
   "patterns": [
     {
+      "code": "codexWriterConflict",
+      "match": {
+        "regex": "already has an active writer"
+      },
+      "solutions": []
+    },
+    {
       "code": "codexThreadResume",
       "match": {
         "regex": "thread/resume"

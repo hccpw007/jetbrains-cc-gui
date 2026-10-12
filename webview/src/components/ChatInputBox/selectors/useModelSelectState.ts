@@ -1,0 +1,156 @@
+import { useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { normalizeClaudeModelId, strip1MContextSuffix } from '../types';
+import type { ModelInfo } from '../types';
+import { readClaudeModelMapping } from '../../../utils/claudeModelMapping';
+import { resolveModelDescription, resolveModelDisplayLabel } from '../modelLabelUtils';
+import {
+  buildModelDropdownSections,
+  MAX_VISIBLE_MODEL_OPTIONS,
+  modelMatchesSearchQuery,
+  readPinnedModelIds,
+  shouldShowModelSearch,
+  tokenizeSearchQuery,
+} from '../modelSelectUtils';
+
+interface UseModelSelectStateArgs {
+  value: string;
+  models: ModelInfo[];
+  currentProvider: string;
+  longContextEnabled: boolean;
+}
+
+/**
+ * Holds ModelSelect's open/search/pinned state plus every derived value
+ * (current model resolution, label/description helpers, filtered sections).
+ */
+export function useModelSelectState({ value, models, currentProvider, longContextEnabled }: UseModelSelectStateArgs) {
+  const { t } = useTranslation();
+  const [isOpen, setIsOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  // Keyboard-navigated row while the search input is focused; -1 = none.
+  const [highlightIndex, setHighlightIndex] = useState(-1);
+  const [pinnedIds, setPinnedIds] = useState<string[]>(() => readPinnedModelIds(currentProvider));
+  const deferredSearchQuery = useDeferredValue(searchQuery);
+
+  // Strip [1m] suffix for finding the model in the list
+  const strippedValue = strip1MContextSuffix(value);
+  // User-defined models are never alias-migrated: a custom claude-opus-4-8
+  // must match its own row, not the built-in Opus 5 row (double check mark).
+  const customModelIds = useMemo(
+    () => new Set(models.filter(m => m.isCustom).map(m => m.id)),
+    [models],
+  );
+  const normalizedValue = currentProvider === 'claude'
+    ? normalizeClaudeModelId(strippedValue, customModelIds)
+    : strippedValue;
+  // Prefer the user's selection even when the catalog is still loading / only a
+  // static fallback is available. Falling back to models[0] made OpenCode (and
+  // other dynamic providers) visually snap back to the first entry after leaving
+  // history and remounting ChatScreen.
+  const currentModel = models.find(m => m.id === normalizedValue)
+    || models.find(m => m.id === strippedValue)
+    || (strippedValue
+      ? { id: strippedValue, label: strippedValue } as ModelInfo
+      : models[0]);
+  const modelMapping = readClaudeModelMapping();
+
+  useEffect(() => {
+    setPinnedIds(readPinnedModelIds(currentProvider));
+  }, [currentProvider]);
+
+  const isSelectedModel = (modelId: string): boolean => {
+    if (currentProvider !== 'claude') {
+      return modelId === strippedValue;
+    }
+    return normalizeClaudeModelId(modelId, customModelIds) === normalizedValue;
+  };
+
+  const getModelLabel = (model: ModelInfo, show1MContext = false): string => {
+    return resolveModelDisplayLabel(model, {
+      t,
+      currentProvider,
+      modelMapping,
+      show1MContext,
+      longContextEnabled,
+    });
+  };
+
+  const getModelDescription = (model: ModelInfo): string | undefined => {
+    return resolveModelDescription(model, t);
+  };
+
+  const searchTokens = useMemo(() => tokenizeSearchQuery(deferredSearchQuery), [deferredSearchQuery]);
+  const filteredModels = searchTokens.length > 0
+    ? models.filter((model) => modelMatchesSearchQuery(searchTokens, {
+        id: model.id,
+        label: getModelLabel(model, false),
+        description: getModelDescription(model),
+      }))
+    : models;
+
+  const { sections, hiddenCount: hiddenModelCount } = buildModelDropdownSections(filteredModels, pinnedIds, {
+    visibleLimit: MAX_VISIBLE_MODEL_OPTIONS,
+  });
+  const visibleModelCount = sections.reduce((n, s) => n + s.models.length, 0);
+  const showSearch = shouldShowModelSearch(models.length, searchQuery);
+  const pinnedSet = useMemo(() => new Set(pinnedIds), [pinnedIds]);
+
+  // Rows in rendered order (sections flattened) drive keyboard navigation.
+  const flatVisibleModelIds = useMemo(
+    () => sections.flatMap((section) => section.models.map((model) => model.id)),
+    [sections],
+  );
+  const searchActive = searchTokens.length > 0;
+
+  // Typing restarts navigation; reopening the dropdown does too.
+  useEffect(() => {
+    setHighlightIndex(-1);
+  }, [deferredSearchQuery, isOpen]);
+
+  const moveHighlight = useCallback((delta: 1 | -1) => {
+    const count = flatVisibleModelIds.length;
+    if (count === 0) return;
+    setHighlightIndex((prev) => {
+      const current = prev >= 0 && prev < count ? prev : searchActive ? 0 : -1;
+      if (current < 0) return delta > 0 ? 0 : count - 1;
+      return (current + delta + count) % count;
+    });
+  }, [flatVisibleModelIds, searchActive]);
+
+  const clearSearch = useCallback(() => {
+    setSearchQuery('');
+  }, []);
+
+  const activeHighlightIndex = highlightIndex >= 0 && highlightIndex < flatVisibleModelIds.length
+    ? highlightIndex
+    : -1;
+  // While searching, the first hit is pre-selected so Enter picks it directly.
+  const highlightedModelId = flatVisibleModelIds[
+    activeHighlightIndex >= 0 ? activeHighlightIndex : searchActive ? 0 : -1
+  ] ?? null;
+
+  return {
+    t,
+    isOpen,
+    setIsOpen,
+    searchQuery,
+    setSearchQuery,
+    clearSearch,
+    pinnedIds,
+    setPinnedIds,
+    pinnedSet,
+    currentModel,
+    modelMapping,
+    isSelectedModel,
+    getModelLabel,
+    getModelDescription,
+    filteredModels,
+    sections,
+    hiddenModelCount,
+    visibleModelCount,
+    showSearch,
+    highlightedModelId,
+    moveHighlight,
+  };
+}

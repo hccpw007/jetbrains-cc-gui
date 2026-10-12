@@ -19,12 +19,16 @@ function makeOptions(overrides: Partial<UseModelStatePersistenceOptions> = {}): 
     setCodexPermissionMode: vi.fn(),
     setSelectedGrokModel: vi.fn(),
     setSelectedKimiModel: vi.fn(),
+    setSelectedMiniMaxModel: vi.fn(),
+    setSelectedZcodeModel: vi.fn(),
     setSelectedOpenCodeModel: vi.fn(),
     setSelectedPiModel: vi.fn(),
     setSelectedOmpModel: vi.fn(),
     setSelectedDshModel: vi.fn(),
     setGrokPermissionMode: vi.fn(),
     setKimiPermissionMode: vi.fn(),
+    setMiniMaxPermissionMode: vi.fn(),
+    setZcodePermissionMode: vi.fn(),
     setOpenCodePermissionMode: vi.fn(),
     setPiPermissionMode: vi.fn(),
     setOmpPermissionMode: vi.fn(),
@@ -41,12 +45,16 @@ function makeOptions(overrides: Partial<UseModelStatePersistenceOptions> = {}): 
     codexPermissionMode: 'default' as PermissionMode,
     selectedGrokModel: 'grok-4.6',
     selectedKimiModel: 'auto',
+    selectedMiniMaxModel: 'auto',
+    selectedZcodeModel: 'GLM-5.3',
     selectedOpenCodeModel: 'opencode-default',
     selectedPiModel: 'auto',
     selectedOmpModel: 'auto',
     selectedDshModel: 'auto',
     grokPermissionMode: 'default' as PermissionMode,
     kimiPermissionMode: 'default' as PermissionMode,
+    miniMaxPermissionMode: 'default' as PermissionMode,
+    zcodePermissionMode: 'default' as PermissionMode,
     openCodePermissionMode: 'default' as PermissionMode,
     piPermissionMode: 'default' as PermissionMode,
     ompPermissionMode: 'default' as PermissionMode,
@@ -89,7 +97,7 @@ describe('useModelStatePersistence — boot sync does not clobber the persisted 
     // Reinstall wipes JCEF localStorage → the hook would fall back to 'default'.
     // Pushing that to Java on boot would clobber the app-level PropertiesComponent
     // value (e.g. bypassPermissions) that survives the reinstall — the reported
-    // "reinstall forgets Auto" bug. Java is the source of truth via get_mode.
+    // "reinstall forgets Full Auto" bug. Java is the source of truth via get_mode.
     renderHook(() => useModelStatePersistence(makeOptions()));
     vi.advanceTimersByTime(200); // fire the deferred syncToBackend
 
@@ -98,6 +106,18 @@ describe('useModelStatePersistence — boot sync does not clobber the persisted 
     expect(bridgeEventsFor('set_provider')).toHaveLength(1);
     expect(bridgeEventsFor('set_model')).toHaveLength(1);
     expect(bridgeEventsFor('set_codex_fast_mode')).toHaveLength(1);
+  });
+
+  it('migrates a legacy autoEdit mode to acceptEdits during restore', () => {
+    localStorage.setItem('model-selection-state', JSON.stringify({
+      provider: 'claude',
+      claudePermissionMode: 'autoEdit',
+    }));
+
+    const setClaudePermissionMode = vi.fn();
+    renderHook(() => useModelStatePersistence(makeOptions({ setClaudePermissionMode })));
+
+    expect(setClaudePermissionMode).toHaveBeenCalledWith('acceptEdits');
   });
 
   it('does NOT send set_mode on boot even when localStorage carries a non-default mode', () => {
@@ -220,6 +240,27 @@ describe('useModelStatePersistence — retired model migration', () => {
     expect(setSelectedClaudeModel).toHaveBeenCalledWith('claude-sonnet-5');
     expect(setSelectedClaudeModel).not.toHaveBeenCalledWith('claude-fable-5');
     expect(bridgeEventsFor('set_model')).toEqual([['set_model', 'claude-sonnet-5']]);
+  });
+
+  it('restores a saved custom model verbatim even when its id is in the retired table', () => {
+    // The user added claude-opus-4-8 as a custom model on purpose. Restoring it
+    // must not rewrite it to opus-5 the way a stale built-in id would be.
+    const setSelectedClaudeModel = vi.fn();
+    localStorage.setItem('claude-custom-models', JSON.stringify([
+      { id: 'claude-opus-4-8', label: 'My Opus 4.8' },
+    ]));
+    localStorage.setItem('model-selection-state', JSON.stringify({
+      provider: 'claude',
+      claudeModel: 'claude-opus-4-8',
+      longContextEnabled: true,
+    }));
+
+    renderHook(() => useModelStatePersistence(makeOptions({ setSelectedClaudeModel })));
+    vi.advanceTimersByTime(200);
+
+    expect(setSelectedClaudeModel).toHaveBeenCalledWith('claude-opus-4-8');
+    expect(setSelectedClaudeModel).not.toHaveBeenCalledWith('claude-opus-5');
+    expect(bridgeEventsFor('set_model')).toEqual([['set_model', 'claude-opus-4-8[1m]']]);
   });
 
   it('migrates a backend-supplied retired model via __INITIAL_TAB_MODEL__', () => {

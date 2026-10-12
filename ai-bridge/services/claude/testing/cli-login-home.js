@@ -25,9 +25,12 @@ import path from 'node:path';
 
 const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-gui-test-home-'));
 fs.mkdirSync(path.join(tempHome, '.codemoss'), { recursive: true });
+// visionMcpEnabled: false keeps image tests deterministic: with the toggle on
+// (the production default) attachments would be diverted to temp files for the
+// vision MCP, while these tests assert structured base64 image blocks.
 fs.writeFileSync(
   path.join(tempHome, '.codemoss', 'config.json'),
-  JSON.stringify({ claude: { current: '__cli_login__', providers: {} } }),
+  JSON.stringify({ claude: { current: '__cli_login__', providers: {} }, visionMcpEnabled: false }),
   'utf8'
 );
 

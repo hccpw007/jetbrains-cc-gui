@@ -15,9 +15,12 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
+import com.intellij.util.concurrency.AppExecutorUtil;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Claude message callback handler.
@@ -37,6 +40,10 @@ public class ClaudeMessageHandler implements MessageCallback {
 
     // Content accumulator for the current assistant message
     private final StringBuilder assistantContent = new StringBuilder();
+    private final StringBuilder pendingDelta = new StringBuilder();
+    private String pendingDeltaType;
+    private ScheduledFuture<?> materializationTask;
+    private long materializationGeneration;
 
     // Current assistant message object being processed
     private Message currentAssistantMessage = null;
@@ -94,6 +101,7 @@ public class ClaudeMessageHandler implements MessageCallback {
         this.messageMerger = messageMerger;
         this.gson = gson;
         this.settingsService = settingsService != null ? settingsService : new CodemossSettingsService();
+        state.setMessageMaterializer(this::flushPendingDelta);
     }
 
     /**
@@ -111,67 +119,92 @@ public class ClaudeMessageHandler implements MessageCallback {
      */
     @Override
     public void onMessage(String type, String content) {
-        // Route to the appropriate handler based on message type
+        // These branches never read or mutate the message list, so they run
+        // without the message lock: taking it would queue the transport snapshot
+        // and every EDT reader sharing it behind work that cannot race them.
         switch (type) {
-            case "user":
-                handleUserMessage(content);
-                break;
-            case "assistant":
-                handleAssistantMessage(content);
-                break;
-            case "thinking":
-                handleThinkingMessage();
-                break;
-            case "content":
-                // Non-streaming mode: complete content block, update message
-                handleContent(content);
-                break;
-            case "content_delta":
-                // Streaming: incremental content, forward to frontend
-                handleContentDelta(content);
-                break;
-            // Streaming: thinking delta
-            case "thinking_delta":
-                handleThinkingDelta(content);
-                break;
-            // Streaming: start and end markers
-            case "stream_start":
-                handleStreamStart();
-                break;
-            case "stream_end":
-                handleStreamEnd();
-                break;
-            case "block_reset":
-                handleBlockReset();
-                break;
-            case "session_id":
-                handleSessionId(content);
-                break;
-            case "tool_result":
-                handleToolResult(content);
-                break;
-            case "message_end":
-                handleMessageEnd();
-                break;
-            case "result":
-                handleResult(content);
-                break;
-            case "usage":
-                handleUsage(content);
-                break;
+            case "node_log":
+                callbackHandler.notifyNodeLog(content);
+                return;
             case "slash_commands":
                 handleSlashCommands(content);
-                break;
-            case "system":
-                handleSystemMessage(content);
-                break;
+                return;
             case "rate_limit_event":
                 handleRateLimit(content);
+                return;
+            case "system":
+                handleSystemMessage(content);
+                return;
+            case "result":
+                // Besides the raw-tree mutation it shares with the locked
+                // handlers, this one reads ~/.claude/settings.json to resolve the
+                // billing model. That read is why it manages its own lock window.
+                handleResult(content);
+                return;
+            default:
                 break;
-            case "node_log":
-                // Forward Node.js logs to frontend console
-                callbackHandler.notifyNodeLog(content);
-                break;
+        }
+        synchronized (state.getMessageStateLock()) {
+            if (!type.equals(pendingDeltaType)) {
+                flushPendingDeltaAndNotify();
+            }
+            // Every case runs under the message lock: the handlers below mutate the
+            // live list and the raw trees nested in it, which the transport snapshot
+            // walks on another thread.
+            //
+            // Lock order: this lock is always taken before the webview event queue's
+            // internal lock, never after. A callback that enqueues (notifyMessageUpdate,
+            // notifyStateChange, ...) may reach that queue, so nothing may call back
+            // into SessionState while holding it.
+            // Route to the appropriate handler based on message type
+            switch (type) {
+                case "user":
+                    handleUserMessage(content);
+                    break;
+                case "assistant":
+                    handleAssistantMessage(content);
+                    break;
+                case "thinking":
+                    handleThinkingMessage();
+                    break;
+                case "content":
+                    // Non-streaming mode: complete content block, update message
+                    handleContent(content);
+                    break;
+                case "content_delta":
+                    // Streaming: incremental content, forward to frontend
+                    handleContentDelta(content);
+                    break;
+                // Streaming: thinking delta
+                case "thinking_delta":
+                    handleThinkingDelta(content);
+                    break;
+                // Streaming: start and end markers
+                case "stream_start":
+                    handleStreamStart();
+                    break;
+                case "stream_end":
+                    handleStreamEnd();
+                    break;
+                case "block_reset":
+                    handleBlockReset();
+                    break;
+                case "session_id":
+                    handleSessionId(content);
+                    break;
+                case "tool_result":
+                    handleToolResult(content);
+                    break;
+                case "message_end":
+                    handleMessageEnd();
+                    break;
+                case "usage":
+                    handleUsage(content);
+                    break;
+                default:
+                    LOG.debug("ClaudeMessageHandler: Unhandled message type: " + type);
+                    break;
+            }
         }
     }
 
@@ -180,48 +213,51 @@ public class ClaudeMessageHandler implements MessageCallback {
      */
     @Override
     public void onError(String error) {
-        if (errorReportedThisTurn && error != null && error.equals(lastReportedError)) {
-            LOG.debug("Suppressing duplicate error for current Claude turn");
-            return;
+        synchronized (state.getMessageStateLock()) {
+            flushPendingDelta();
+            if (errorReportedThisTurn && error != null && error.equals(lastReportedError)) {
+                LOG.debug("Suppressing duplicate error for current Claude turn");
+                return;
+            }
+
+            isStreaming = false;
+            streamEndedThisTurn = false;
+            errorReportedThisTurn = true;
+            lastReportedError = error;
+            resetSegmentState();
+
+            // Reset thinking state if still active — same as onComplete() and handleStreamEnd()
+            if (isThinking) {
+                isThinking = false;
+                callbackHandler.notifyThinkingStatusChanged(false);
+            }
+
+            state.setError(error);
+            state.setBusy(false);
+            state.setLoading(false);
+
+            Message errorMessage = new Message(Message.Type.ERROR, error);
+            state.addMessage(errorMessage);
+
+            // Signal stream-end BEFORE pushing the error snapshot, and do it
+            // unconditionally (not only when wasStreaming):
+            //  - Ordering: the webview's onStreamEnd cancels any pending
+            //    updateMessages rAF. If we pushed the error snapshot first, that
+            //    cancellation could drop it and the error would never render. Ending
+            //    the stream first lets the subsequent snapshot land normally.
+            //  - Unconditional: a non-streaming turn, or a turn that failed before
+            //    [STREAM_START], has wasStreaming=false — but its last tool_use may
+            //    still be unresolved. onStreamEnd is what marks dangling tool_use as
+            //    denied, so skipping it leaves the tool card spinning forever. The
+            //    webview side treats a no-active-stream onStreamEnd as exactly this
+            //    finalize-only case.
+            callbackHandler.notifyStreamEnd();
+            callbackHandler.notifyMessageUpdate(state.getMessages());
+            callbackHandler.notifyStateChange(state.isBusy(), state.isLoading(), state.getError());
+
+            // Show error in status bar
+            ClaudeNotifier.showError(project, error);
         }
-
-        isStreaming = false;
-        streamEndedThisTurn = false;
-        errorReportedThisTurn = true;
-        lastReportedError = error;
-        resetSegmentState();
-
-        // Reset thinking state if still active — same as onComplete() and handleStreamEnd()
-        if (isThinking) {
-            isThinking = false;
-            callbackHandler.notifyThinkingStatusChanged(false);
-        }
-
-        state.setError(error);
-        state.setBusy(false);
-        state.setLoading(false);
-
-        Message errorMessage = new Message(Message.Type.ERROR, error);
-        state.addMessage(errorMessage);
-
-        // Signal stream-end BEFORE pushing the error snapshot, and do it
-        // unconditionally (not only when wasStreaming):
-        //  - Ordering: the webview's onStreamEnd cancels any pending
-        //    updateMessages rAF. If we pushed the error snapshot first, that
-        //    cancellation could drop it and the error would never render. Ending
-        //    the stream first lets the subsequent snapshot land normally.
-        //  - Unconditional: a non-streaming turn, or a turn that failed before
-        //    [STREAM_START], has wasStreaming=false — but its last tool_use may
-        //    still be unresolved. onStreamEnd is what marks dangling tool_use as
-        //    denied, so skipping it leaves the tool card spinning forever. The
-        //    webview side treats a no-active-stream onStreamEnd as exactly this
-        //    finalize-only case.
-        callbackHandler.notifyStreamEnd();
-        callbackHandler.notifyMessageUpdate(state.getMessages());
-        callbackHandler.notifyStateChange(state.isBusy(), state.isLoading(), state.getError());
-
-        // Show error in status bar
-        ClaudeNotifier.showError(project, error);
     }
 
     /**
@@ -229,50 +265,53 @@ public class ClaudeMessageHandler implements MessageCallback {
      */
     @Override
     public void onComplete(SDKResult result) {
-        if (streamEndedThisTurn) {
-            streamEndedThisTurn = false;
+        synchronized (state.getMessageStateLock()) {
+            flushPendingDelta();
+            if (streamEndedThisTurn) {
+                streamEndedThisTurn = false;
+                errorReportedThisTurn = false;
+                lastReportedError = null;
+                // Safety net: ensure loading state is cleared even when stream_end
+                // was received normally.  handleStreamEnd() already calls
+                // notifyStateChange, but the async JCEF chain may drop it.
+                // This redundant call is harmless (idempotent) and prevents the UI
+                // from getting stuck in "responding" state.
+                state.setBusy(false);
+                state.setLoading(false);
+                callbackHandler.notifyStateChange(state.isBusy(), state.isLoading(), state.getError());
+                return;
+            }
+
+            // If streaming was active but [STREAM_END] was never received (e.g., SDK error,
+            // timeout, or process interruption), we must explicitly end the stream here.
+            // Without this, the StreamMessageCoalescer remains in streamActive=true state,
+            // which causes SessionCallbackAdapter.onStateChange() to suppress showLoading(false),
+            // leaving the UI stuck in "responding" state forever.
+            // This mirrors the same pattern used in onError() above.
+            boolean wasStreaming = isStreaming;
+            isStreaming = false;
+            resetSegmentState();
+
+            // Reset thinking state if still active
+            if (isThinking) {
+                isThinking = false;
+                callbackHandler.notifyThinkingStatusChanged(false);
+            }
+
             errorReportedThisTurn = false;
             lastReportedError = null;
-            // Safety net: ensure loading state is cleared even when stream_end
-            // was received normally.  handleStreamEnd() already calls
-            // notifyStateChange, but the async JCEF chain may drop it.
-            // This redundant call is harmless (idempotent) and prevents the UI
-            // from getting stuck in "responding" state.
             state.setBusy(false);
             state.setLoading(false);
+            state.updateLastModifiedTime();
+
+            if (wasStreaming) {
+                LOG.warn("onComplete called without prior stream_end — forcing stream cleanup");
+                callbackHandler.notifyMessageUpdate(state.getMessages());
+                callbackHandler.notifyStreamEnd();
+            }
+
             callbackHandler.notifyStateChange(state.isBusy(), state.isLoading(), state.getError());
-            return;
         }
-
-        // If streaming was active but [STREAM_END] was never received (e.g., SDK error,
-        // timeout, or process interruption), we must explicitly end the stream here.
-        // Without this, the StreamMessageCoalescer remains in streamActive=true state,
-        // which causes SessionCallbackAdapter.onStateChange() to suppress showLoading(false),
-        // leaving the UI stuck in "responding" state forever.
-        // This mirrors the same pattern used in onError() above.
-        boolean wasStreaming = isStreaming;
-        isStreaming = false;
-        resetSegmentState();
-
-        // Reset thinking state if still active
-        if (isThinking) {
-            isThinking = false;
-            callbackHandler.notifyThinkingStatusChanged(false);
-        }
-
-        errorReportedThisTurn = false;
-        lastReportedError = null;
-        state.setBusy(false);
-        state.setLoading(false);
-        state.updateLastModifiedTime();
-
-        if (wasStreaming) {
-            LOG.warn("onComplete called without prior stream_end — forcing stream cleanup");
-            callbackHandler.notifyMessageUpdate(state.getMessages());
-            callbackHandler.notifyStreamEnd();
-        }
-
-        callbackHandler.notifyStateChange(state.isBusy(), state.isLoading(), state.getError());
     }
 
     // ===== Private methods: handle different message types =====
@@ -470,9 +509,7 @@ public class ClaudeMessageHandler implements MessageCallback {
         assistantContent.append(novelContent);
 
         ensureCurrentAssistantMessageExists();
-        currentAssistantMessage.content = assistantContent.toString();
-        applyTextDeltaToRaw(novelContent);
-        textSegmentActive = true;
+        queueDelta("content_delta", novelContent, !textSegmentActive);
 
         callbackHandler.notifyContentDelta(novelContent);
         // During streaming, skip the full message update: the delta channel
@@ -653,15 +690,31 @@ public class ClaudeMessageHandler implements MessageCallback {
         try {
             JsonObject resultJson = gson.fromJson(content, JsonObject.class);
             LOG.debug("Result message received");
-            if (resultJson.has("usage") && resultJson.get("usage").isJsonObject()
-                    && currentAssistantMessage != null && currentAssistantMessage.raw != null) {
+            if (!resultJson.has("usage") || !resultJson.get("usage").isJsonObject()) {
+                return;
+            }
+            JsonObject turnUsage = resultJson.getAsJsonObject("usage");
+            // Cheap handler-thread check first: with no live assistant message the
+            // result is discarded anyway, so skip the settings.json disk read too.
+            if (currentAssistantMessage == null || currentAssistantMessage.raw == null) {
+                return;
+            }
+            // Resolving the billing model reads ~/.claude/settings.json. Do it
+            // before taking the message lock, which the transport snapshot and
+            // every EDT reader queue on: a disk read inside it would stall the
+            // streaming pipeline for the duration of the file access.
+            String pricingModel = resolvePricingModel(state.getModel());
+            synchronized (state.getMessageStateLock()) {
+                flushPendingDelta();
+                if (currentAssistantMessage == null || currentAssistantMessage.raw == null) {
+                    return;
+                }
                 // SDKResultMessage.usage aggregates every API call of the turn. Stamp it as the
                 // top-level turnUsage field for the per-turn token display in the webview.
                 // Distinct from message.usage below, which tracks per-call context occupancy
                 // for the status bar and must keep its semantics.
-                JsonObject turnUsage = resultJson.getAsJsonObject("usage");
                 currentAssistantMessage.raw.add("turnUsage", turnUsage.deepCopy());
-                Double turnCostUsd = UsageCostCalculator.calculateTurnCostUsd(state.getProvider(), turnUsage, resolvePricingModel(state.getModel()));
+                Double turnCostUsd = UsageCostCalculator.calculateTurnCostUsd(state.getProvider(), turnUsage, pricingModel);
                 if (turnCostUsd != null) {
                     currentAssistantMessage.raw.addProperty("turnCostUsd", turnCostUsd);
                 }
@@ -834,12 +887,12 @@ public class ClaudeMessageHandler implements MessageCallback {
      * Handle block reset signal received during streaming.
      * This indicates a new assistant message has started within the stream
      * (e.g., after a tool_use loop iteration). Reset segment state and notify
-     * frontend to clear streaming content refs, preventing cross-turn content merging.
+     * the frontend so it can record the boundary for live block reconciliation.
      */
     private void handleBlockReset() {
         LOG.debug("Block reset received - clearing segment state and notifying frontend");
         resetSegmentState();
-        // Notify frontend to clear streaming refs (streamingThinkingRef, streamingContentRef)
+        // The frontend records the boundary and keeps cumulative streaming refs.
         callbackHandler.notifyBlockReset();
     }
 
@@ -862,17 +915,56 @@ public class ClaudeMessageHandler implements MessageCallback {
             LOG.debug("Skipping replayed thinking delta (len=" + content.length() + ")");
             return;
         }
-        boolean applied = applyThinkingDeltaToRaw(novelContent);
-        if (applied) {
-            thinkingSegmentActive = true;
-            // CRITICAL: Only notify frontend when delta was actually applied.
-            // Frontend has no dedup and will accumulate, causing duplication.
-            callbackHandler.notifyThinkingDelta(novelContent);
-            // Thinking blocks are structural: the frontend renders them from
-            // raw blocks in collapsible UI sections, so raw must stay in sync.
-            callbackHandler.notifyMessageUpdate(state.getMessages());
+        textSegmentActive = false;
+        queueDelta("thinking_delta", novelContent, !thinkingSegmentActive);
+        callbackHandler.notifyThinkingDelta(novelContent);
+    }
+
+    private void queueDelta(String type, String delta, boolean firstInSegment) {
+        pendingDeltaType = type;
+        pendingDelta.append(delta);
+        if (firstInSegment || !isStreaming) {
+            flushPendingDeltaAndNotify();
+        } else if (materializationTask == null) {
+            long generation = ++materializationGeneration;
+            materializationTask = AppExecutorUtil.getAppScheduledExecutorService().schedule(() -> {
+                synchronized (state.getMessageStateLock()) {
+                    if (generation == materializationGeneration) {
+                        flushPendingDeltaAndNotify();
+                    }
+                }
+            }, 33, TimeUnit.MILLISECONDS);
+        }
+    }
+
+    private void flushPendingDelta() {
+        if (materializationTask != null) {
+            materializationTask.cancel(false);
+            materializationTask = null;
+        }
+        materializationGeneration++;
+        if (pendingDelta.length() == 0) {
+            return;
+        }
+        String delta = pendingDelta.toString();
+        String type = pendingDeltaType;
+        pendingDelta.setLength(0);
+        pendingDeltaType = null;
+        if ("content_delta".equals(type)) {
+            currentAssistantMessage.content = assistantContent.toString();
+            applyTextDeltaToRaw(delta);
+            textSegmentActive = true;
         } else {
-            LOG.debug("Skipping duplicate thinking delta (len=" + content.length() + ")");
+            applyThinkingDeltaToRaw(delta);
+            thinkingSegmentActive = true;
+        }
+    }
+
+    private void flushPendingDeltaAndNotify() {
+        boolean thinking = "thinking_delta".equals(pendingDeltaType);
+        flushPendingDelta();
+        if (thinking) {
+            callbackHandler.notifyMessageUpdate(state.getMessages());
         }
     }
 

@@ -240,7 +240,9 @@
           "kimi": "Kimi CLI",
           "opencode": "OpenCode",
           "pi": "PI CLI",
-          "omp": "OMP CLI"
+          "omp": "OMP CLI",
+          "minimax": "MiniMax Code",
+          "zcode": "ZCode"
         },
         "currentProviderAuto": "目前使用自動選擇：{{provider}}",
         "currentProviderManual": "目前使用手動選擇的 provider：{{provider}}",
@@ -857,6 +859,14 @@
       "copied": "Copied to clipboard",
       "copyFailed": "Failed to copy",
       "tools": {
+        "minimax": {
+          "name": "MiniMax Code",
+          "description": "MiniMax 終端編碼智能體。需 Node.js 22.19+ / 24+（不支援 23）；命令：minimax / mcode"
+        },
+        "zcode": {
+          "name": "ZCode",
+          "description": "智譜 ZCode 桌面編碼應用（GLM 模型）"
+        },
         "grok": {
           "name": "Grok CLI",
           "description": "xAI Grok 終端編碼助手"
@@ -1130,8 +1140,12 @@
     "quoteSuccess": "已引用！"
   },
   "contextMenu": {
+    "cut": "剪下",
     "copy": "複製",
-    "quote": "引用"
+    "paste": "貼上",
+    "newline": "插入換行",
+    "quote": "引用",
+    "copyLink": "複製連結位址"
   },
   "usage": {
     "checkingLabel": "正在偵測 tokentracker-cli…",
@@ -1376,7 +1390,32 @@
     "bashGroupBatchExecution": "Batch Execution",
     "bashGroupCompleted": "completed",
     "bashGroupAllCompleted": "All Completed",
-    "bashGroupFailed": "failed"
+    "bashGroupFailed": "failed",
+    "reportFindings": {
+      "title": "審查發現",
+      "findingsCount_one": "{{count}} 項發現",
+      "findingsCount_other": "{{count}} 項發現",
+      "confirmedCount_one": "{{count}} 項已確認",
+      "confirmedCount_other": "{{count}} 項已確認",
+      "plausibleCount_one": "{{count}} 項待複核",
+      "plausibleCount_other": "{{count}} 項待複核",
+      "confirmed": "已確認",
+      "plausible": "待複核",
+      "fixed": "已修復",
+      "skipped": "已略過",
+      "noChangeNeeded": "無需修改",
+      "empty": "未發現問題",
+      "summaryLabel": "審查摘要",
+      "summary": "問題摘要",
+      "failureScenario": "觸發情境",
+      "reviewLevel": "審查層級：{{level}}",
+      "openFile": "開啟 {{filePath}}",
+      "expandFinding": "展開問題詳情",
+      "collapseFinding": "收合問題詳情",
+      "expandReport": "展開審查發現",
+      "collapseReport": "收合審查發現",
+      "untitled": "未命名問題"
+    }
   },
   "todo": {
     "inProgress": "進行中 {{completed}}/{{total}} 個任務",
@@ -1577,11 +1616,15 @@
   "models": {
     "addModel": "新增模型",
     "searchPlaceholder": "搜尋模型",
+    "clearSearch": "清除搜尋",
     "noModelsFound": "找不到模型",
+    "noSearchMatches": "沒有符合「{{query}}」的模型",
     "hiddenModelCount": "+ 還有 {{count}} 個模型。輸入以搜尋。",
     "pinned": "置頂",
     "pin": "置頂",
     "unpin": "取消置頂",
+    "retiredBadge": "已下線",
+    "retiredCustomHint": "官方 API 已不再提供此模型 ID。因為它是你新增的自訂模型，外掛會原樣送出，不做替換。",
     "claude": {
       "sonnet46": {
         "label": "Sonnet 4.6",
@@ -1591,9 +1634,17 @@
         "label": "Sonnet 5",
         "description": "Sonnet 5 · 預設推薦模型"
       },
+      "sonnet55": {
+        "label": "Sonnet 5.5",
+        "description": "Sonnet 5.5 · Sonnet 最新升級模型"
+      },
+      "opus55": {
+        "label": "Opus 5.5",
+        "description": "Opus 5.5 · Opus 最新升級模型"
+      },
       "opus5": {
         "label": "Opus 5",
-        "description": "Opus 5 · Opus 最新升級模型"
+        "description": "Opus 5 · 保留的前代 Opus 模型"
       },
       "opus46_1m": {
         "label": "Opus 4.6",
@@ -1603,13 +1654,13 @@
         "label": "Haiku 4.5",
         "description": "Haiku 4.5 · 速度最快，適合快速回覆"
       },
-      "opus48": {
-        "label": "Opus 4.8",
-        "description": "Opus 4.8 · 保留的前代 Opus 模型"
+      "fable51": {
+        "label": "Fable 5.1",
+        "description": "Fable 5.1 · 最強大 · Mythos 級"
       },
       "fable5": {
         "label": "Fable 5",
-        "description": "Fable 5 · 最強大 · Mythos 級"
+        "description": "Fable 5 · 保留的前代 Fable 模型"
       }
     },
     "longContext": {
@@ -1619,6 +1670,18 @@
       "tooltipDisabled": "Haiku不支援1M上下文"
     },
     "codex": {
+      "gpt6astra": {
+        "label": "GPT-6 Astra",
+        "description": "新一代旗艦模型，擅長自主電腦操作與長鏈路智慧體任務"
+      },
+      "gpt61sol": {
+        "label": "GPT-6.1 Sol",
+        "description": "面向複雜專業工作的 GPT-6.1 前沿模型"
+      },
+      "gpt6sol": {
+        "label": "GPT-6 Sol",
+        "description": "面向複雜專業工作的 GPT-6 前沿模型"
+      },
       "gpt56sol": {
         "label": "GPT-5.6 Sol",
         "description": "面向複雜專業工作的前沿模型"
@@ -1626,6 +1689,10 @@
       "gpt56terra": {
         "label": "GPT-5.6 Terra",
         "description": "智慧與成本兼顧的 GPT-5.6 模型"
+      },
+      "gpt6luna": {
+        "label": "GPT-6 Luna",
+        "description": "針對成本敏感場景優化的 GPT-6 模型"
       },
       "gpt56luna": {
         "label": "GPT-5.6 Luna",
@@ -1669,9 +1736,15 @@
       "tooltip": "自動接受檔案編輯",
       "description": "自動接受檔案建立/編輯，減少確認步驟"
     },
-    "bypassPermissions": {
-      "label": "自動模式",
+    "auto": {
+      "label": "自動審批",
       "shortLabel": "自動",
+      "tooltip": "由模型審查器自動批准或阻止操作",
+      "description": "使用供應商原生審查器處理審批，同時保留安全邊界"
+    },
+    "bypassPermissions": {
+      "label": "全自動",
+      "shortLabel": "全自動",
       "tooltip": "略過所有權限檢查",
       "description": "完全自動化，略過所有權限檢查【請謹慎使用】"
     }
@@ -1691,6 +1764,12 @@
       "label": "Auto Edit",
       "tooltip": "Codex approval_policy=on-request – asks for approval when needed",
       "description": "Balanced option. Allows normal editing flow while still requiring approvals when needed."
+    },
+    "auto": {
+      "label": "替我審批",
+      "shortLabel": "自動",
+      "tooltip": "Codex approvals_reviewer=auto_review：由自動審查器處理可審批請求。",
+      "description": "維持 workspace-write 沙箱；審查器無法批准的請求仍會升級處理。"
     },
     "bypassPermissions": {
       "label": "Full Auto",
@@ -1732,6 +1811,12 @@
     },
     "kimi": {
       "label": "Kimi CLI"
+    },
+    "minimax": {
+      "label": "MiniMax Code"
+    },
+    "zcode": {
+      "label": "ZCode"
     },
     "gemini": {
       "label": "Gemini Cli"
@@ -1911,6 +1996,11 @@
     "copied": "已複製",
     "openDependencySettings": "開啟相依性管理",
     "recommended": "推薦",
+    "codexWriterConflict": {
+      "title": "Codex 執行緒被佔用",
+      "intro": "新回合啟動時，上一個回合的 Codex 程序仍在寫入該執行緒。外掛現在會在傳送前自動停止上一回合的程序。",
+      "reason": "請稍等幾秒後重新傳送該訊息，無需新建會話。"
+    },
     "codexThreadResume": {
       "title": "工作階段執行緒已失效",
       "intro": "新建工作階段即可解決此問題。目前工作階段的執行緒 ID 在 Codex 伺服器端已不存在。",

@@ -12,13 +12,14 @@
  *   - processCodexEventStream(events, state, config) — the main event loop
  */
 
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { existsSync } from 'fs';
 import { readFile, unlink, writeFile } from 'fs/promises';
 import { requestPermissionFromJava } from '../../permission-handler.js';
 import { findSessionFileByThreadId } from './codex-agents-loader.js';
 import { extractPatchFromResponseItemPayload, parseApplyPatchToOperations } from './codex-patch-parser.js';
 import { extractUpdatePlanFromResponseItemPayload } from './codex-plan-parser.js';
+import { createSessionReader } from './codex-session-reader.js';
 import {
   truncateForDisplay, getStableItemId, extractCommand,
   smartToolName, smartDescription, mapCommandToolNameToPermissionToolName,
@@ -327,8 +328,13 @@ export function createInitialEventState(emitMessage) {
     deniedCommandToolUseIds: new Set(),
     emittedDeniedCommandToolResultIds: new Set(),
     sessionFilePath: null,
+    sessionFileThreadId: null,
+    sessionReplayReader: null,
+    sessionReplayGeneration: null,
+    sessionReplayTurnContext: null,
     sessionLineCursor: 0,
     sessionReplayBaselineCursor: null,
+    sessionReplayBaselineAnchor: null,
     sessionReplayBaselinePrepared: false,
     sessionFunctionCursor: null,
     sessionTurnStartCursor: null,
@@ -388,19 +394,46 @@ function ensureToolUseId(state, phase, item) {
 }
 
 function ensureSessionFilePath(state, threadId) {
+  if (state.sessionFileThreadId && threadId && state.sessionFileThreadId !== threadId) {
+    state.sessionFilePath = null;
+    state.sessionReplayTurnContext = null;
+    state.sessionTurnBoundaryReady = false;
+    state.sessionReplayBaselineCursor = null;
+    state.sessionReplayBaselineAnchor = null;
+  }
+  if (threadId) state.sessionFileThreadId = threadId;
   if (state.sessionFilePath && existsSync(state.sessionFilePath)) return state.sessionFilePath;
   if (!threadId) return null;
   state.sessionFilePath = findSessionFileByThreadId(threadId);
   return state.sessionFilePath;
 }
 
-function splitSessionJsonlEntries(content) {
-  if (typeof content !== 'string' || !content.length) return [];
-  return content.split('\n').filter((line) => line.trim());
+function hashSessionPrefix(lines, lineCount) {
+  const hash = createHash('sha256');
+  for (let index = 0; index < lineCount; index++) {
+    hash.update(lines[index]).update('\n');
+  }
+  return hash.digest('hex');
 }
 
-function countSessionJsonlLines(content) {
-  return splitSessionJsonlEntries(content).length;
+async function readSessionLines(state, sessionPath) {
+  state.sessionReplayReader ??= createSessionReader();
+  const reader = await state.sessionReplayReader.read(sessionPath);
+  if (state.sessionReplayGeneration !== null && state.sessionReplayGeneration !== reader.generation) {
+    const boundary = state.sessionReplayTurnContext
+      ? reader.lines.lastIndexOf(state.sessionReplayTurnContext) : -1;
+    const anchor = state.sessionReplayBaselineAnchor;
+    const baseline = anchor && reader.lines.length >= anchor.cursor &&
+      hashSessionPrefix(reader.lines, anchor.lineCount) === anchor.digest
+      ? anchor.cursor : reader.lines.length;
+    state.sessionTurnBoundaryReady = boundary >= 0;
+    state.sessionTurnStartCursor = boundary >= 0 ? boundary + 1 : null;
+    state.sessionFunctionCursor = state.sessionTurnStartCursor;
+    state.sessionLineCursor = boundary >= 0 ? boundary + 1 : baseline;
+    state.sessionReplayBaselineCursor = baseline;
+  }
+  state.sessionReplayGeneration = reader.generation;
+  return reader.lines;
 }
 
 /**
@@ -409,8 +442,15 @@ function countSessionJsonlLines(content) {
  * after this cursor, so historical function calls can never become replay candidates.
  */
 export async function prepareSessionReplayBoundary(state, threadId) {
+  if (state.sessionReplayReader) await state.sessionReplayReader.dispose();
+  state.sessionReplayReader = null;
+  state.sessionReplayGeneration = null;
+  state.sessionReplayTurnContext = null;
   state.sessionReplayBaselinePrepared = true;
   state.sessionReplayBaselineCursor = threadId ? null : 0;
+  state.sessionReplayBaselineAnchor = threadId ? null : {
+    cursor: 0, lineCount: 0, digest: hashSessionPrefix([], 0),
+  };
   state.sessionFunctionCursor = null;
   state.sessionTurnStartCursor = null;
   state.sessionTurnBoundaryReady = false;
@@ -428,9 +468,12 @@ export async function prepareSessionReplayBoundary(state, threadId) {
   }
 
   try {
-    const content = await readFile(sessionPath, 'utf8');
-    const baseline = countSessionJsonlLines(content);
+    const lines = await readSessionLines(state, sessionPath);
+    const baseline = lines.length + (state.sessionReplayReader.hasPartialEntry ? 1 : 0);
     state.sessionReplayBaselineCursor = baseline;
+    state.sessionReplayBaselineAnchor = {
+      cursor: baseline, lineCount: lines.length, digest: hashSessionPrefix(lines, lines.length),
+    };
     state.sessionLineCursor = baseline;
   } catch (error) {
     logWarn('SESSION_REPLAY', 'Unable to capture the pre-turn session boundary; JSONL function replay is disabled for this turn:', error?.message || error);
@@ -442,23 +485,23 @@ function getSessionThreadId(state, config) {
 }
 
 async function ensureSessionTurnBoundary(state, config) {
-  if (state.sessionTurnBoundaryReady) return true;
-  if (!state.sessionReplayBaselinePrepared || !Number.isInteger(state.sessionReplayBaselineCursor)) {
+  if (!state.sessionTurnBoundaryReady &&
+      (!state.sessionReplayBaselinePrepared || !Number.isInteger(state.sessionReplayBaselineCursor))) {
     return false;
   }
 
   const sessionPath = ensureSessionFilePath(state, getSessionThreadId(state, config));
   if (!sessionPath) return false;
 
-  let content = '';
+  let lines;
   try {
-    content = await readFile(sessionPath, 'utf8');
+    lines = await readSessionLines(state, sessionPath);
   } catch (error) {
     logDebug('SESSION_REPLAY', 'Failed to read session file while locating the current turn boundary:', error?.message || error);
     return false;
   }
 
-  const lines = splitSessionJsonlEntries(content);
+  if (state.sessionTurnBoundaryReady) return true;
   const baseline = state.sessionReplayBaselineCursor;
   for (let i = baseline; i < lines.length; i++) {
     let parsed;
@@ -469,6 +512,7 @@ async function ensureSessionTurnBoundary(state, config) {
     state.sessionTurnStartCursor = boundaryCursor;
     state.sessionFunctionCursor = boundaryCursor;
     state.sessionTurnBoundaryReady = true;
+    state.sessionReplayTurnContext = lines[i];
     logDebug('SESSION_REPLAY', `Established current turn boundary at session line ${boundaryCursor}.`);
     return true;
   }
@@ -485,13 +529,11 @@ function warnSessionTurnBoundaryNotReady(state) {
 async function readLatestTurnContextFromSession(state, threadId) {
   const sessionPath = ensureSessionFilePath(state, threadId);
   if (!sessionPath) return null;
-  let content = '';
-  try { content = await readFile(sessionPath, 'utf8'); } catch (error) {
+  let lines;
+  try { lines = await readSessionLines(state, sessionPath); } catch (error) {
     logDebug('PERM_DEBUG', 'Failed to read session for turn_context:', error?.message || error);
     return null;
   }
-  if (!content.trim()) return null;
-  const lines = splitSessionJsonlEntries(content);
   const startIndex = Math.max(0, lines.length - SESSION_CONTEXT_SCAN_MAX_LINES);
   for (let i = lines.length - 1; i >= startIndex; i--) {
     const line = lines[i];
@@ -517,15 +559,14 @@ async function replayCurrentTurnTokenCountsFromSession(state, config) {
   const sessionPath = ensureSessionFilePath(state, getSessionThreadId(state, config));
   if (!sessionPath) return 0;
 
-  let content = '';
+  let lines;
   try {
-    content = await readFile(sessionPath, 'utf8');
+    lines = await readSessionLines(state, sessionPath);
   } catch (error) {
     logDebug('CONTEXT_USAGE', 'Failed to read current-turn token usage:', error?.message || error);
     return 0;
   }
 
-  const lines = splitSessionJsonlEntries(content);
   const startIndex = Number.isInteger(state.sessionTurnStartCursor)
     ? state.sessionTurnStartCursor
     : lines.length;
@@ -542,14 +583,11 @@ async function replayCurrentTurnTokenCountsFromSession(state, config) {
 async function collectPatchOperationsFromSession(state, config) {
   const sessionPath = ensureSessionFilePath(state, getSessionThreadId(state, config));
   if (!sessionPath) return [];
-  let content = '';
-  try { content = await readFile(sessionPath, 'utf8'); } catch (error) {
+  let lines;
+  try { lines = await readSessionLines(state, sessionPath); } catch (error) {
     console.warn('[DEBUG] Failed to read session file:', sessionPath, error?.message || error);
     return [];
   }
-  if (!content.trim()) return [];
-
-  const lines = splitSessionJsonlEntries(content);
   const startIndex = state.sessionLineCursor > 0
     ? state.sessionLineCursor
     : Math.max(0, lines.length - SESSION_PATCH_SCAN_MAX_LINES);
@@ -583,14 +621,12 @@ async function replayMissingFunctionCallsFromSession(state, config) {
   const sessionPath = ensureSessionFilePath(state, getSessionThreadId(state, config));
   if (!sessionPath) return { toolUses: 0, toolResults: 0 };
 
-  let content = '';
-  try { content = await readFile(sessionPath, 'utf8'); } catch (error) {
+  let lines;
+  try { lines = await readSessionLines(state, sessionPath); } catch (error) {
     logDebug('SESSION_REPLAY', 'Failed to read session file for function replay:', error?.message || error);
     return { toolUses: 0, toolResults: 0 };
   }
-  if (!content.trim()) return { toolUses: 0, toolResults: 0 };
-
-  const lines = splitSessionJsonlEntries(content);
+  if (!state.sessionTurnBoundaryReady) return { toolUses: 0, toolResults: 0 };
   const startIndex = Math.max(
     state.sessionTurnStartCursor,
     Number.isInteger(state.sessionFunctionCursor) ? state.sessionFunctionCursor : state.sessionTurnStartCursor,
@@ -772,8 +808,23 @@ function emitDeniedCommandToolResultOnce(state, toolUseId, messageText = 'Comman
   state.emittedDeniedCommandToolResultIds.add(toolUseId);
 }
 
+/**
+ * Whether the event stream still needs the plugin's Java approval bridge.
+ * Codex native review resolves approval before item.started is emitted.
+ * @param {object} config
+ * @returns {boolean}
+ */
+export function shouldBridgeCodexApproval(config) {
+  const approvalPolicy = config?.threadOptions?.approvalPolicy;
+  return config?.normalizedPermissionMode !== 'auto'
+    && typeof approvalPolicy === 'string'
+    && approvalPolicy !== 'never';
+}
+
 async function maybeRequestCommandApprovalViaBridge(state, config, { toolUseId, command, smartTool, description }) {
-  const shouldBridgeApproval = config.threadOptions.approvalPolicy && config.threadOptions.approvalPolicy !== 'never';
+  // `item.started` is emitted after Codex has resolved the command approval and
+  // started the process. Native auto review must therefore not ask Java again.
+  const shouldBridgeApproval = shouldBridgeCodexApproval(config);
   if (!shouldBridgeApproval) return true;
   const permissionToolName = mapCommandToolNameToPermissionToolName(smartTool);
   const requestInput = { command, description, source: 'codex_command_execution' };
@@ -933,7 +984,7 @@ async function handleFileChange(item, state, config) {
 
   const shouldBridgeApproval = !isError &&
     !isAutoEditPermissionMode(config.normalizedPermissionMode) &&
-    (config.threadOptions.approvalPolicy && config.threadOptions.approvalPolicy !== 'never');
+    shouldBridgeCodexApproval(config);
   if (shouldBridgeApproval && patchBatches.length > 0) {
     deniedCallIds = await requestPatchApprovalsViaBridge(patchBatches);
     if (deniedCallIds.size > 0) {
@@ -1198,6 +1249,14 @@ export async function processCodexEventStream(events, state, config) {
       console.warn('[DEBUG] Suppressed post-completion Codex taskkill parse noise:', streamErrorMessage);
     } else {
       throw streamError;
+    }
+  } finally {
+    try {
+      await replayMissingFunctionCallsDuringStream(state, config);
+    } finally {
+      if (state.sessionReplayReader) await state.sessionReplayReader.dispose();
+      state.sessionReplayReader = null;
+      state.sessionReplayGeneration = null;
     }
   }
 }

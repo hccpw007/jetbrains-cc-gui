@@ -18,12 +18,10 @@ describe('useSubmitHandler', () => {
         getTextContent: () => '',
         invalidateCache: vi.fn(),
         attachments: [],
-        isLoading: false,
         sdkStatusLoading: false,
         sdkInstalled: true,
         currentProvider: 'claude',
         clearInput,
-        cancelPendingInput: vi.fn(),
         externalAttachments: undefined,
         setInternalAttachments: vi.fn(),
         fileCompletion: { close },
@@ -53,12 +51,10 @@ describe('useSubmitHandler', () => {
         getTextContent: () => 'hello',
         invalidateCache: vi.fn(),
         attachments: [],
-        isLoading: false,
         sdkStatusLoading: true,
-        sdkInstalled: true,
+        sdkInstalled: false,
         currentProvider: 'claude',
         clearInput,
-        cancelPendingInput: vi.fn(),
         externalAttachments: undefined,
         setInternalAttachments: vi.fn(),
         fileCompletion: { close },
@@ -78,6 +74,42 @@ describe('useSubmitHandler', () => {
     expect(clearInput).not.toHaveBeenCalled();
   });
 
+  it('sends while the shared SDK query is still loading when this provider is already installed', () => {
+    vi.useFakeTimers();
+    const addToast = vi.fn();
+    const onSubmit = vi.fn();
+    const close = vi.fn();
+
+    const { result } = renderHook(() =>
+      useSubmitHandler({
+        getTextContent: () => 'hello',
+        invalidateCache: vi.fn(),
+        attachments: [],
+        sdkStatusLoading: true,
+        sdkInstalled: true,
+        currentProvider: 'grok',
+        clearInput: vi.fn(),
+        externalAttachments: undefined,
+        setInternalAttachments: vi.fn(),
+        fileCompletion: { close },
+        commandCompletion: { close },
+        agentCompletion: { close },
+        promptCompletion: { close },
+        dollarCommandCompletion: { close },
+        recordInputHistory: vi.fn(),
+        onSubmit,
+        addToast,
+        t: (key) => key,
+      })
+    );
+
+    result.current();
+    vi.advanceTimersByTime(20);
+    expect(addToast).not.toHaveBeenCalled();
+    expect(onSubmit).toHaveBeenCalledWith('hello', undefined);
+    vi.useRealTimers();
+  });
+
   it('prompts install when SDK is missing', () => {
     const addToast = vi.fn();
     const onInstallSdk = vi.fn();
@@ -87,12 +119,10 @@ describe('useSubmitHandler', () => {
         getTextContent: () => 'hello',
         invalidateCache: vi.fn(),
         attachments: [],
-        isLoading: false,
         sdkStatusLoading: false,
         sdkInstalled: false,
         currentProvider: 'codex',
         clearInput: vi.fn(),
-        cancelPendingInput: vi.fn(),
         externalAttachments: undefined,
         setInternalAttachments: vi.fn(),
         fileCompletion: { close: vi.fn() },
@@ -126,12 +156,10 @@ describe('useSubmitHandler', () => {
         getTextContent: () => 'hello',
         invalidateCache,
         attachments: [createAttachment('a1')],
-        isLoading: false,
         sdkStatusLoading: false,
         sdkInstalled: true,
         currentProvider: 'claude',
         clearInput,
-        cancelPendingInput: vi.fn(),
         externalAttachments: undefined,
         setInternalAttachments: vi.fn(),
         fileCompletion: { close },

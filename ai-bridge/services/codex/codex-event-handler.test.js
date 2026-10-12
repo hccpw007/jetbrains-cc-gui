@@ -1,19 +1,253 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { appendFile, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { appendFile, mkdtemp, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import fsPromises from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import {
   createInitialEventState,
   isWindowsTaskkillParseNoise,
   prepareSessionReplayBoundary,
   processCodexEventStream,
+  shouldBridgeCodexApproval,
 } from './codex-event-handler.js';
 
 async function* eventsFrom(items) {
   for (const item of items) {
     yield item;
   }
+}
+
+test('session replay reads history once, skips 30 unchanged updates, and drains late results', async (context) => {
+  const directory = await mkdtemp(join(tmpdir(), 'codex-incremental-baseline-'));
+  const sessionPath = join(directory, 'session.jsonl');
+  const history = `${JSON.stringify({ type: 'session_meta', payload: { text: 'history'.repeat(10000) } })}\n`;
+  const current = [
+    { type: 'turn_context', payload: { cwd: '/fixture' } },
+    { type: 'response_item', payload: { type: 'function_call', name: 'shell_command', call_id: 'incremental-call', arguments: '{"command":"echo 中文"}' } },
+  ].map(JSON.stringify).join('\n') + '\n';
+  const result = JSON.stringify({ type: 'response_item', payload: { type: 'function_call_output', call_id: 'incremental-call', output: '完成' } }) + '\n';
+  await writeFile(sessionPath, history);
+  const originalReadFile = fsPromises.readFile;
+  const originalOpen = fsPromises.open;
+  let bytesRead = 0;
+  fsPromises.readFile = async (path, ...args) => {
+    const content = await originalReadFile(path, ...args);
+    if (path === sessionPath) bytesRead += Buffer.byteLength(content);
+    return content;
+  };
+  fsPromises.open = async (path, ...args) => {
+    const handle = await originalOpen(path, ...args);
+    if (path === sessionPath) {
+      const read = handle.read.bind(handle);
+      handle.read = async (...readArgs) => {
+        const result = await read(...readArgs);
+        bytesRead += result.bytesRead;
+        return result;
+      };
+    }
+    return handle;
+  };
+  syncBuiltinESMExports();
+  try {
+    const messages = [];
+    const state = createInitialEventState((message) => messages.push(message));
+    state.sessionFilePath = sessionPath;
+    await prepareSessionReplayBoundary(state, 'fixture');
+    assert.equal(bytesRead, Buffer.byteLength(history));
+    await appendFile(sessionPath, current);
+    async function* stream() {
+      yield { type: 'turn.started' };
+      yield { type: 'item.updated' };
+      const warmedBytes = bytesRead;
+      assert.equal(warmedBytes, Buffer.byteLength(history + current) + 64);
+      for (let index = 0; index < 30; index++) yield { type: 'item.updated' };
+      assert.equal(bytesRead - warmedBytes, 0, 'unchanged updates must not read historical bytes');
+      await appendFile(sessionPath, result);
+    }
+    await captureStdout(() => processCodexEventStream(stream(), state, { ...makeConfig(), threadId: 'fixture' }));
+    assert.equal(bytesRead, Buffer.byteLength(history + current + result) + 128);
+    const blocks = messages.flatMap((message) => message.message?.content ?? []);
+    assert.deepEqual(blocks.map((block) => block.type), ['tool_use', 'tool_result']);
+    assert.equal(blocks[1].content, '完成');
+    assert.equal(state.sessionReplayReader, null);
+    context.diagnostic(`History ${Buffer.byteLength(history)} bytes; append ${Buffer.byteLength(current + result)} bytes; overlap validation 128 bytes; total read ${bytesRead} bytes; unchanged updates 0 bytes.`);
+  } finally {
+    fsPromises.readFile = originalReadFile;
+    fsPromises.open = originalOpen;
+    syncBuiltinESMExports();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('session replay retains an incomplete UTF-8 JSON record until its newline arrives', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'codex-incremental-utf8-'));
+  const sessionPath = join(directory, 'session.jsonl');
+  const messages = [];
+  const state = createInitialEventState((message) => messages.push(message));
+  state.sessionFilePath = sessionPath;
+  await writeFile(sessionPath, '');
+  await prepareSessionReplayBoundary(state, 'fixture');
+  const call = Buffer.from(JSON.stringify({ type: 'response_item', payload: { type: 'function_call', name: 'shell_command', call_id: 'split-call', arguments: '{"command":"echo 中文"}' } }) + '\n');
+  const split = call.indexOf(Buffer.from('中')) + 1;
+  try {
+    async function* stream() {
+      await appendFile(sessionPath, '{"type":"turn_context","payload":{}}\n');
+      yield { type: 'turn.started' };
+      await appendFile(sessionPath, call.subarray(0, split));
+      yield { type: 'item.updated' };
+      assert.equal(messages.length, 0);
+      await appendFile(sessionPath, call.subarray(split));
+      yield { type: 'item.updated' };
+    }
+    await captureStdout(() => processCodexEventStream(stream(), state, { ...makeConfig(), threadId: 'fixture' }));
+    assert.equal(messages[0]?.message.content[0].input.command, 'echo 中文');
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+for (const reset of ['truncate', 'replace']) {
+  test(`session replay recovers after ${reset} without historical or duplicate tools`, async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'codex-incremental-reset-'));
+    const sessionPath = join(directory, 'session.jsonl');
+    const context = JSON.stringify({ type: 'turn_context', timestamp: '2026-09-28T00:00:00Z', payload: {} });
+    const call = (id) => JSON.stringify({ type: 'response_item', payload: { type: 'function_call', name: 'shell_command', call_id: id, arguments: JSON.stringify({ command: `echo ${id}` }) } });
+    const messages = [];
+    const state = createInitialEventState((message) => messages.push(message));
+    state.sessionFilePath = sessionPath;
+    await writeFile(sessionPath, `${call('historical')}\n${' '.repeat(10000)}\n`);
+    await prepareSessionReplayBoundary(state, 'fixture');
+    try {
+      async function* stream() {
+        await appendFile(sessionPath, `${context}\n${call('first')}\n`);
+        yield { type: 'item.updated' };
+        const rewritten = `${call('historical')}\n${context}\n${call('first')}\ninvalid\n${call('second')}\n`;
+        if (reset === 'replace') {
+          await writeFile(`${sessionPath}.new`, rewritten);
+          await rename(`${sessionPath}.new`, sessionPath);
+        } else {
+          await writeFile(sessionPath, rewritten);
+        }
+        yield { type: 'item.updated' };
+        yield { type: 'turn.completed' };
+      }
+      await captureStdout(() => processCodexEventStream(stream(), state, { ...makeConfig(), threadId: 'fixture' }));
+      const uses = messages.flatMap((message) => message.message?.content ?? []).filter((block) => block.type === 'tool_use');
+      assert.deepEqual(uses.map((block) => block.id), ['first', 'second']);
+      assert.equal(state.sessionReplayReader, null);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+}
+
+for (const preserveHistory of [true, false]) {
+  test(`replacement before turn discovery ${preserveHistory ? 'preserves a verified baseline' : 'rejects an unrelated history prefix'}`, async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'codex-baseline-replacement-'));
+    const sessionPath = join(directory, 'session.jsonl');
+    const call = (id) => ({ type: 'response_item', payload: { type: 'function_call', name: 'shell_command', call_id: id, arguments: JSON.stringify({ command: `echo ${id}` }) } });
+    const output = (id) => ({ type: 'response_item', payload: { type: 'function_call_output', call_id: id, output: `result ${id}` } });
+    const historicalEntries = [
+      { type: 'turn_context', timestamp: 'historical', payload: {} },
+      call('historical'), output('historical'),
+    ];
+    const encode = (entries) => entries.map(JSON.stringify).join('\n') + '\n';
+    const messages = [];
+    const state = createInitialEventState((message) => messages.push(message));
+    state.sessionFilePath = sessionPath;
+    await writeFile(sessionPath, encode(historicalEntries));
+    await prepareSessionReplayBoundary(state, 'fixture');
+    assert.equal(state.sessionTurnBoundaryReady, false);
+    try {
+      const history = preserveHistory ? historicalEntries : [
+        { type: 'turn_context', timestamp: 'unrelated', payload: {} },
+        call('historical'), output('historical'),
+      ];
+      await writeFile(`${sessionPath}.new`, encode([
+        ...history,
+        { type: 'turn_context', timestamp: 'current', payload: {} },
+        call('current'), output('current'),
+      ]));
+      await rename(`${sessionPath}.new`, sessionPath);
+      await captureStdout(() => processCodexEventStream(eventsFrom([
+        { type: 'turn.started' },
+        { type: 'item.updated' },
+        { type: 'item.updated' },
+        { type: 'turn.completed' },
+      ]), state, { ...makeConfig(), threadId: 'fixture' }));
+      const blocks = messages.flatMap((message) => message.message?.content ?? []);
+      assert.deepEqual(blocks.map((block) => [block.type, block.id ?? block.tool_use_id]), preserveHistory
+        ? [['tool_use', 'current'], ['tool_result', 'current']] : []);
+      if (preserveHistory) assert.equal(blocks[1].content, 'result current');
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+}
+
+test('an unfinished blank line at the baseline does not hide the next turn context', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'codex-incremental-blank-'));
+  const sessionPath = join(directory, 'session.jsonl');
+  const messages = [];
+  const state = createInitialEventState((message) => messages.push(message));
+  state.sessionFilePath = sessionPath;
+  await writeFile(sessionPath, '{}\n   ');
+  await prepareSessionReplayBoundary(state, 'fixture');
+  try {
+    await appendFile(sessionPath, [
+      { type: 'turn_context', payload: {} },
+      { type: 'response_item', payload: { type: 'function_call', name: 'shell_command', call_id: 'after-blank', arguments: '{"command":"echo blank"}' } },
+    ].map(JSON.stringify).join('\n') + '\n');
+    await captureStdout(() => processCodexEventStream(eventsFrom([{ type: 'item.updated' }]), state, { ...makeConfig(), threadId: 'fixture' }));
+    assert.equal(messages[0]?.message.content[0].id, 'after-blank');
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+for (const ending of ['completed', 'failed', 'aborted']) {
+  test(`session replay drains late output and releases reader when stream is ${ending}`, async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'codex-incremental-final-'));
+    const sessionPath = join(directory, 'session.jsonl');
+    const messages = [];
+    const state = createInitialEventState((message) => messages.push(message));
+    state.sessionFilePath = sessionPath;
+    await writeFile(sessionPath, '');
+    await prepareSessionReplayBoundary(state, 'fixture');
+    const reader = state.sessionReplayReader;
+    try {
+      async function* stream() {
+        await appendFile(sessionPath, [
+          { type: 'turn_context', payload: {} },
+          { type: 'response_item', payload: { type: 'function_call', name: 'shell_command', call_id: 'late', arguments: '{"command":"echo late"}' } },
+        ].map(JSON.stringify).join('\n') + '\n');
+        yield { type: 'turn.started' };
+        yield { type: 'item.updated' };
+        if (ending === 'completed') yield { type: 'turn.completed' };
+        await appendFile(sessionPath, JSON.stringify({ type: 'response_item', payload: { type: 'function_call_output', call_id: 'late', output: 'late output' } }) + '\n');
+        if (ending === 'aborted') {
+          state.commandApprovalAbortRequested = true;
+          throw new Error('operation aborted');
+        }
+        if (ending === 'failed') throw new Error('fixture stream failure');
+      }
+      await captureStdout(async () => {
+        const processing = processCodexEventStream(stream(), state, { ...makeConfig(), threadId: 'fixture' });
+        if (ending === 'failed') await assert.rejects(processing, /fixture stream failure/);
+        else await processing;
+      });
+      const blocks = messages.flatMap((message) => message.message?.content ?? []);
+      assert.deepEqual(blocks.map((block) => block.type), ['tool_use', 'tool_result']);
+      assert.equal(blocks[1].content, 'late output');
+      assert.equal(state.sessionReplayReader, null);
+      assert.deepEqual(reader.lines, []);
+      assert.equal(reader.offset, 0);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
 }
 
 async function captureStdout(fn) {
@@ -45,6 +279,30 @@ function makeConfig() {
     turnAbortController: new AbortController(),
   };
 }
+
+test('native auto review does not invoke the late Java approval bridge', () => {
+  assert.equal(
+    shouldBridgeCodexApproval({
+      normalizedPermissionMode: 'auto',
+      threadOptions: { approvalPolicy: 'on-request' },
+    }),
+    false,
+  );
+  assert.equal(
+    shouldBridgeCodexApproval({
+      normalizedPermissionMode: 'default',
+      threadOptions: { approvalPolicy: 'on-request' },
+    }),
+    true,
+  );
+  assert.equal(
+    shouldBridgeCodexApproval({
+      normalizedPermissionMode: 'bypassPermissions',
+      threadOptions: { approvalPolicy: 'never' },
+    }),
+    false,
+  );
+});
 
 const CUSTOM_EXEC_PATCH = [
   '*** Begin Patch',

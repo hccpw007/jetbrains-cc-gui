@@ -1,6 +1,7 @@
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import type { Attachment } from '../types.js';
 import { generateId } from '../utils/generateId.js';
+import { createImagePasteDedupe } from '../utils/imagePasteDedupe.js';
 import { insertTextAtCursor } from '../utils/selectionUtils.js';
 import {
   parseExplicitFileReferences,
@@ -8,6 +9,7 @@ import {
   registerLineFileReference,
 } from '../utils/fileReferences.js';
 import { perfTimer } from '../../../utils/debug.js';
+import { sendBridgeEvent } from '../../../utils/bridge.js';
 
 declare global {
   interface Window {
@@ -62,13 +64,22 @@ export function usePasteAndDrop({
   flushInput,
 }: UsePasteAndDropOptions): UsePasteAndDropReturn {
   /**
+   * One keystroke can deliver the same clipboard image twice (webview paste
+   * event and a Java producer); only the first delivery becomes an attachment.
+   */
+  const imagePasteDedupeRef = useRef(createImagePasteDedupe());
+
+  /**
    * Handle paste event - detect images and plain text
    */
   const handlePaste = useCallback(
     (e: React.ClipboardEvent) => {
       const items = e.clipboardData?.items;
 
-      if (!items) {
+      if (!items || items.length === 0) {
+        // JCEF may have intercepted the paste event; ask Java side to check clipboard for images
+        e.preventDefault();
+        sendBridgeEvent('paste_image');
         return;
       }
 
@@ -104,6 +115,10 @@ export function usePasteAndDrop({
                 mediaType,
                 data: base64,
               };
+
+              if (!imagePasteDedupeRef.current.isNewPaste(attachment, 'dom-paste')) {
+                return;
+              }
 
               setInternalAttachments((prev) => [...prev, attachment]);
             };
@@ -215,6 +230,9 @@ export function usePasteAndDrop({
           });
 
           timer.end();
+        } else {
+          // No image, no text, no file — JCEF may have intercepted a clipboard image
+          sendBridgeEvent('paste_image');
         }
       }
     },
@@ -376,6 +394,11 @@ export function usePasteAndDrop({
         mediaType: mediaType || 'image/png',
         data: base64,
       };
+
+      if (!imagePasteDedupeRef.current.isNewPaste(attachment, 'java-bridge')) {
+        return;
+      }
+
       setInternalAttachments((prev) => [...prev, attachment]);
     };
     window.addEventListener('java-paste-image', onJavaPasteImage);

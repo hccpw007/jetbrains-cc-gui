@@ -21,6 +21,7 @@ import java.io.File;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.LongConsumer;
 
 /**
  * Manages session lifecycle operations: creation, history loading,
@@ -42,6 +43,10 @@ public class SessionLifecycleManager {
         CodexSDKBridge getCodexSDKBridge();
 
         default com.github.claudecodegui.provider.grok.GrokSDKBridge getGrokSDKBridge() {
+            return null;
+        }
+
+        default com.github.claudecodegui.provider.zcode.ZcodeSDKBridge getZcodeSDKBridge() {
             return null;
         }
 
@@ -103,14 +108,7 @@ public class SessionLifecycleManager {
                                                           : CompletableFuture.completedFuture(null);
 
         interruptFuture.thenRun(() -> {
-            if (oldSession != null) {
-                String oldEpoch = oldSession.getRuntimeSessionEpoch();
-                host.getClaudeSDKBridge().resetPersistentRuntime(oldEpoch);
-                if (host.getGrokSDKBridge() != null) {
-                    host.getGrokSDKBridge().resetPersistentRuntime(oldEpoch);
-                }
-                LOG.info("[Lifecycle] Requested daemon runtime reset for old epoch=" + oldEpoch);
-            }
+            releasePersistentProviderResources(oldSession, "new session");
             LOG.info("Old session interrupted, creating new session");
 
             ApplicationManager.getApplication().invokeLater(() -> {
@@ -121,7 +119,10 @@ public class SessionLifecycleManager {
             ClaudeSession newSession = createDefaultSession();
             newSession.setPermissionMode(previousPermissionMode);
             newSession.setProvider(previousProvider);
-            newSession.setModel(previousModel);
+            // Verbatim copy: the live value was already sanitized when set (migrated
+            // on restore, or an explicit custom id via set_model), so re-migrating
+            // here could only rewrite a user's custom model behind their back.
+            newSession.setModelVerbatim(previousModel);
             LOG.info("Restored session state to new session: mode=" + previousPermissionMode
                              + ", provider=" + previousProvider + ", model=" + previousModel);
 
@@ -155,14 +156,7 @@ public class SessionLifecycleManager {
                 : CompletableFuture.completedFuture(null);
 
         interruptFuture.thenRun(() -> {
-            if (oldSession != null) {
-                String oldEpoch = oldSession.getRuntimeSessionEpoch();
-                host.getClaudeSDKBridge().resetPersistentRuntime(oldEpoch);
-                if (host.getGrokSDKBridge() != null) {
-                    host.getGrokSDKBridge().resetPersistentRuntime(oldEpoch);
-                }
-                LOG.info("[Lifecycle] Requested daemon runtime reset for old epoch=" + oldEpoch);
-            }
+            releasePersistentProviderResources(oldSession, "new session from template");
             LOG.info("Old session interrupted, creating new session from template");
 
             ApplicationManager.getApplication().invokeLater(() -> {
@@ -180,7 +174,9 @@ public class SessionLifecycleManager {
                 newSession.setProvider(template.getProvider());
             }
             if (template.getModel() != null) {
-                newSession.setModel(template.getModel());
+                // Templates hold an explicit user choice (possibly a custom model id),
+                // so keep it verbatim like any other explicit selection.
+                newSession.setModelVerbatim(template.getModel());
             }
             if (template.getReasoningEffort() != null) {
                 newSession.setReasoningEffort(template.getReasoningEffort());
@@ -261,20 +257,15 @@ public class SessionLifecycleManager {
                 : CompletableFuture.completedFuture(null);
 
         interruptFuture.thenRun(() -> {
-            if (oldSession != null) {
-                String oldEpoch = oldSession.getRuntimeSessionEpoch();
-                host.getClaudeSDKBridge().resetPersistentRuntime(oldEpoch);
-                if (host.getGrokSDKBridge() != null) {
-                    host.getGrokSDKBridge().resetPersistentRuntime(oldEpoch);
-                }
-                LOG.info("[Lifecycle] Requested daemon runtime reset before history load for old epoch="
-                        + oldEpoch);
-            }
+            releasePersistentProviderResources(oldSession, "history load");
 
             ClaudeSession newSession = createDefaultSession();
             newSession.setPermissionMode(previousPermissionMode);
             newSession.setProvider(provider != null && !provider.trim().isEmpty() ? provider : previousProvider);
-            newSession.setModel(modelToRestore);
+            // Verbatim: a payload model comes from the webview, which is the authority
+            // on custom ids and already applied retired-id migration where it is safe;
+            // a fallback previousModel is a live value that was sanitized when set.
+            newSession.setModelVerbatim(modelToRestore);
             LOG.info("Restored session state to loaded session: mode=" + previousPermissionMode
                              + ", provider=" + newSession.getProvider() + ", model=" + modelToRestore);
 
@@ -285,13 +276,6 @@ public class SessionLifecycleManager {
             String workingDir = (projectPath != null && !projectPath.isEmpty())
                                     ? projectPath : NodeDetector.convertToWslPath(determineWorkingDirectory());
             newSession.setSessionInfo(sessionId, workingDir);
-
-            // Prewarm daemon runtime for the historical session so /context and first message are fast
-            if ("claude".equals(newSession.getProvider())) {
-                host.getClaudeSDKBridge().prewarmDaemonAsync(workingDir, newSession.getRuntimeSessionEpoch(), sessionId);
-            } else if ("grok".equals(newSession.getProvider()) && host.getGrokSDKBridge() != null) {
-                host.getGrokSDKBridge().prewarmDaemonAsync(workingDir, newSession.getRuntimeSessionEpoch(), sessionId);
-            }
 
             newSession.loadFromServer().thenRun(() -> ApplicationManager.getApplication().invokeLater(() -> {
                 // loadFromServer only enqueues updateMessages through the coalescer; if we
@@ -334,11 +318,21 @@ public class SessionLifecycleManager {
             host.callJavaScript("historyLoadComplete", String.valueOf(messageCount));
             return;
         }
-        coalescer.flush(seq -> {
+        LongConsumer signalComplete = seq -> {
             if (!host.isDisposed()) {
                 host.callJavaScript("historyLoadComplete", String.valueOf(messageCount));
             }
-        });
+        };
+        // Same lock contract as enqueue: the flush may deep-copy live messages, and
+        // a loaded session is exactly the case where a writer can still exist. No
+        // session means no live writer, so the lockless call is safe.
+        if (loadedSession != null) {
+            synchronized (loadedSession.getState().getMessageStateLock()) {
+                coalescer.flush(signalComplete);
+            }
+        } else {
+            coalescer.flush(signalComplete);
+        }
     }
 
     /**
@@ -471,6 +465,37 @@ public class SessionLifecycleManager {
                 host.getGrokSDKBridge());
     }
 
+    /**
+     * Release process-backed provider state when the user leaves a logical session.
+     * Persisted transcripts and session IDs remain available, so the next real
+     * message can lazily recreate the selected provider and resume normally.
+     */
+    private void releasePersistentProviderResources(ClaudeSession oldSession, String reason) {
+        if (oldSession == null) {
+            return;
+        }
+
+        String oldEpoch = oldSession.getRuntimeSessionEpoch();
+        ClaudeSDKBridge claudeBridge = host.getClaudeSDKBridge();
+        if (claudeBridge != null) {
+            claudeBridge.resetPersistentRuntime(oldEpoch);
+            claudeBridge.shutdownDaemon();
+        }
+
+        if (host.getGrokSDKBridge() != null) {
+            host.getGrokSDKBridge().resetPersistentRuntime(oldEpoch);
+            host.getGrokSDKBridge().shutdownDaemon();
+        }
+
+        if (host.getZcodeSDKBridge() != null) {
+            host.getZcodeSDKBridge().resetPersistentRuntime(oldEpoch);
+            host.getZcodeSDKBridge().shutdownDaemon();
+        }
+
+        LOG.info("[Lifecycle] Released persistent provider resources for " + reason
+                + ", old epoch=" + oldEpoch);
+    }
+
     private void completeNewSessionBootstrap(ClaudeSession newSession, String workingDirectory, String successLogPrefix) {
         host.clearPendingPermissionRequests();
         host.clearPermissionDecisionMemory();
@@ -480,11 +505,6 @@ public class SessionLifecycleManager {
 
         newSession.setSessionInfo(null, workingDirectory);
         LOG.info(successLogPrefix + workingDirectory + ", epoch=" + newSession.getRuntimeSessionEpoch());
-        if ("claude".equals(newSession.getProvider())) {
-            host.getClaudeSDKBridge().prewarmDaemonAsync(workingDirectory, newSession.getRuntimeSessionEpoch());
-        } else if ("grok".equals(newSession.getProvider()) && host.getGrokSDKBridge() != null) {
-            host.getGrokSDKBridge().prewarmDaemonAsync(workingDirectory, newSession.getRuntimeSessionEpoch());
-        }
         fetchSlashCommandsOnStartup();
 
         ApplicationManager.getApplication().invokeLater(() -> {

@@ -98,6 +98,8 @@ export interface DropdownItemData {
   icon?: string;
   /** Item type */
   type: CompletionType;
+  /** Semantic command content type, used by the Codex picker */
+  contentType?: 'command' | 'skill';
   /** Whether selected (for selectors) */
   checked?: boolean;
   /** Associated data */
@@ -132,6 +134,8 @@ export interface CommandItem {
   description?: string;
   /** Category */
   category?: string;
+  /** Semantic content type used to choose the invocation prefix */
+  contentType?: 'command' | 'skill';
 }
 
 /**
@@ -152,7 +156,7 @@ export interface DropdownPosition {
  * Trigger query information
  */
 export interface TriggerQuery {
-  /** Trigger symbol ('@' or '/' or '#' or '!') */
+  /** Trigger symbol ('@', '/', '#', '!' or '$') */
   trigger: string;
   /** Search keyword */
   query: string;
@@ -189,6 +193,7 @@ export type PermissionMode =
   | 'default'
   | 'acceptEdits'
   | 'plan'
+  | 'auto'
   | 'bypassPermissions'
   | 'smol'
   | 'slow'
@@ -232,8 +237,15 @@ export const AVAILABLE_MODES: ModeInfo[] = [
     description: 'Auto-accept file creation/editing, fewer confirmations',
   },
   {
-    id: 'bypassPermissions',
+    id: 'auto',
     label: 'Auto Mode',
+    icon: 'codicon-shield',
+    tooltip: 'Let the provider review approval requests automatically',
+    description: 'Uses the provider-native reviewer while retaining safety boundaries',
+  },
+  {
+    id: 'bypassPermissions',
+    label: 'Full Auto',
     icon: 'codicon-zap',
     tooltip: 'Bypass all permission checks',
     description: 'Fully automated, bypasses all permission checks [use with caution]',
@@ -276,6 +288,8 @@ export interface ModelInfo {
   id: string;
   label: string;
   description?: string;
+  /** True for user-defined models (Settings → custom models). */
+  isCustom?: boolean;
 }
 
 /**
@@ -337,20 +351,50 @@ export const DEFAULT_CLAUDE_MODEL_ID = 'claude-sonnet-5';
  * saved retired model fails validation and silently resets to the fallback.
  * Retired ids must always map to a LIVE model - mapping one retired id to another
  * (sonnet-4-6 -> sonnet-4-7) kept restoring tabs pinned to a dead model (#1678).
+ * Only list ids that actually fail at the API: claude-opus-4-6 is still served
+ * (verified with `claude -p --model claude-opus-4-6[1m]`) and users add it as a
+ * custom model, so it must NOT be here or it gets rewritten to opus-5.
  */
 const LEGACY_CLAUDE_MODEL_ID_ALIASES: Record<string, string> = {
   'claude-sonnet-4-6': 'claude-sonnet-5',
   'claude-sonnet-4-7': 'claude-sonnet-5',
-  'claude-opus-4-6': 'claude-opus-4-8',
+  'claude-opus-4-8': 'claude-opus-5',
 };
 
-export function normalizeClaudeModelId(modelId: string | undefined | null): string {
+/**
+ * Map a saved/restored Claude model id to the id that should be used now.
+ *
+ * Retired ids are migrated to their live replacement. Ids listed in
+ * `customModelIds` (the user's own custom models) are returned unchanged even
+ * when retired: the user typed that id on purpose, so the plugin must send it
+ * as-is and let the API report an error rather than silently substitute
+ * another model. Callers on restore paths pass the custom set; a caller that
+ * omits it gets the plain migration.
+ */
+export function normalizeClaudeModelId(
+  modelId: string | undefined | null,
+  customModelIds?: ReadonlySet<string>,
+): string {
   if (!modelId) {
     return DEFAULT_CLAUDE_MODEL_ID;
   }
   // First strip any [1m] suffix
   const stripped = strip1MContextSuffix(modelId);
+  if (customModelIds?.has(stripped)) {
+    return stripped;
+  }
   return LEGACY_CLAUDE_MODEL_ID_ALIASES[stripped] ?? stripped;
+}
+
+/**
+ * Whether the id is in the retired-model migration table, i.e. the API no
+ * longer serves it. Used to label custom models that point at a dead id.
+ */
+export function isRetiredClaudeModelId(modelId: string | undefined | null): boolean {
+  if (!modelId) {
+    return false;
+  }
+  return strip1MContextSuffix(modelId) in LEGACY_CLAUDE_MODEL_ID_ALIASES;
 }
 
 /**
@@ -359,19 +403,29 @@ export function normalizeClaudeModelId(modelId: string | undefined | null): stri
  */
 export const CLAUDE_MODELS: ModelInfo[] = [
   {
+    id: 'claude-fable-5-1',
+    label: 'Fable 5.1',
+    description: 'Fable 5.1 · Most powerful · Mythos-class',
+  },
+  {
     id: 'claude-fable-5',
     label: 'Fable 5',
-    description: 'Fable 5 · Most powerful · Mythos-class',
+    description: 'Fable 5 · Previous Fable generation',
+  },
+  {
+    id: 'claude-opus-5-5',
+    label: 'Opus 5.5',
+    description: 'Opus 5.5 · Latest Opus upgrade',
   },
   {
     id: 'claude-opus-5',
     label: 'Opus 5',
-    description: 'Opus 5 · Latest Opus upgrade',
+    description: 'Opus 5 · Previous Opus generation',
   },
   {
-    id: 'claude-opus-4-8',
-    label: 'Opus 4.8',
-    description: 'Opus 4.8 · Previous Opus generation',
+    id: 'claude-sonnet-5-5',
+    label: 'Sonnet 5.5',
+    description: 'Sonnet 5.5 · Latest Sonnet upgrade',
   },
   {
     id: 'claude-sonnet-5',
@@ -390,6 +444,21 @@ export const CLAUDE_MODELS: ModelInfo[] = [
  */
 export const CODEX_MODELS: ModelInfo[] = [
   {
+    id: 'gpt-6-astra',
+    label: 'GPT-6 Astra',
+    description: 'New-generation flagship for autonomous computer use and long agentic tasks.',
+  },
+  {
+    id: 'gpt-6.1-sol',
+    label: 'GPT-6.1 Sol',
+    description: 'GPT-6.1 frontier model for complex professional work.',
+  },
+  {
+    id: 'gpt-6-sol',
+    label: 'GPT-6 Sol',
+    description: 'GPT-6 frontier model for complex professional work.',
+  },
+  {
     id: 'gpt-5.6-sol',
     label: 'GPT-5.6 Sol',
     description: 'Frontier model for complex professional work.',
@@ -400,6 +469,11 @@ export const CODEX_MODELS: ModelInfo[] = [
     description: 'GPT-5.6 model that balances intelligence and cost.',
   },
   {
+    id: 'gpt-6-luna',
+    label: 'GPT-6 Luna',
+    description: 'GPT-6 model optimized for cost-sensitive workloads.',
+  },
+  {
     id: 'gpt-5.6-luna',
     label: 'GPT-5.6 Luna',
     description: 'GPT-5.6 model optimized for cost-sensitive workloads.',
@@ -408,11 +482,6 @@ export const CODEX_MODELS: ModelInfo[] = [
     id: 'gpt-5.5',
     label: 'GPT-5.5',
     description: 'Latest frontier model with stronger capabilities.',
-  },
-  {
-    id: 'gpt-5.4',
-    label: 'GPT-5.4',
-    description: 'Latest frontier model with enhanced capabilities.',
   },
 ];
 
@@ -583,6 +652,53 @@ export const isValidDshPreset = (value: unknown): value is DshPreset =>
   && (DSH_PRESETS.some((preset) => preset.id === value)
     || getUserDshPresetOptions().some((preset) => preset.id === value));
 
+/** MiniMax Code default: omit `--model` so the CLI resolves its own default. */
+export const MINIMAX_DEFAULT_MODEL_ID = 'auto';
+
+export const MINIMAX_MODELS: ModelInfo[] = [
+  {
+    id: MINIMAX_DEFAULT_MODEL_ID,
+    label: 'MiniMax Auto',
+    description: 'Use MiniMax Code default model',
+  },
+  {
+    id: 'minimax/MiniMax-M2.7',
+    label: 'MiniMax M2.7',
+    description: 'MiniMax coding model (thinking forced on)',
+  },
+  {
+    id: 'minimax/MiniMax-M2.7-highspeed',
+    label: 'MiniMax M2.7 Highspeed',
+    description: 'MiniMax low-latency coding model',
+  },
+  {
+    id: 'minimax/MiniMax-M3',
+    label: 'MiniMax M3',
+    description: 'MiniMax multimodal coding model',
+  },
+];
+
+/** ZCode default: GLM coding models served by the ZCode app-server. */
+export const ZCODE_DEFAULT_MODEL_ID = 'GLM-5.3';
+
+export const ZCODE_MODELS: ModelInfo[] = [
+  {
+    id: ZCODE_DEFAULT_MODEL_ID,
+    label: 'GLM-5.3',
+    description: 'ZCode coding model',
+  },
+  {
+    id: 'GLM-5.3-Flash',
+    label: 'GLM-5.3 Flash',
+    description: 'ZCode fast coding model',
+  },
+  {
+    id: 'GLM-5-Turbo',
+    label: 'GLM-5 Turbo',
+    description: 'ZCode coding model',
+  },
+];
+
 /**
  * Available models (backward compatibility)
  */
@@ -612,6 +728,8 @@ export const AVAILABLE_PROVIDERS: ProviderInfo[] = [
   { id: 'pi', label: 'PI CLI', icon: 'codicon-terminal', enabled: true, beta: true },
   { id: 'omp', label: 'OMP CLI', icon: 'codicon-terminal', enabled: true, beta: true },
   { id: 'dsh', label: 'DeepSeek Harness', icon: 'codicon-terminal', enabled: true, beta: true },
+  { id: 'minimax', label: 'MiniMax Code', icon: 'codicon-terminal', enabled: true, beta: true },
+  { id: 'zcode', label: 'ZCode', icon: 'codicon-terminal', enabled: true, beta: true },
 ];
 
 /**
@@ -619,11 +737,14 @@ export const AVAILABLE_PROVIDERS: ProviderInfo[] = [
  * Based on: https://code.claude.com/docs/en/model-config#adjust-effort-level
  */
 export const EFFORT_SUPPORTED_CLAUDE_MODELS = new Set([
+  'claude-fable-5-1',
   'claude-fable-5',
+  'claude-opus-5-5',
   'claude-opus-5',
   'claude-opus-4-8',
   'claude-opus-4-6',
   'claude-opus-4-6[1m]',
+  'claude-sonnet-5-5',
   'claude-sonnet-5',
   'claude-sonnet-4-7',
   'claude-sonnet-4-6',
@@ -633,7 +754,9 @@ export const EFFORT_SUPPORTED_CLAUDE_MODELS = new Set([
  * Claude models that additionally support the 'xhigh' effort level.
  */
 export const XHIGH_EFFORT_CLAUDE_MODELS = new Set([
+  'claude-fable-5-1',
   'claude-fable-5',
+  'claude-opus-5-5',
   'claude-opus-5',
   'claude-opus-4-8',
 ]);
@@ -642,25 +765,29 @@ export const XHIGH_EFFORT_CLAUDE_MODELS = new Set([
  * Claude models that support the 'max' effort level.
  */
 export const MAX_EFFORT_CLAUDE_MODELS = new Set([
+  'claude-fable-5-1',
   'claude-fable-5',
+  'claude-opus-5-5',
   'claude-opus-5',
   'claude-opus-4-8',
   'claude-opus-4-6',
   'claude-opus-4-6[1m]',
+  'claude-sonnet-5-5',
   'claude-sonnet-5',
   'claude-sonnet-4-7',
   'claude-sonnet-4-6',
 ]);
 
 export function codexModelSupportsMaxEffort(modelId: string): boolean {
-  return modelId.trim().toLowerCase().includes('gpt-5.6');
+  return modelId.trim().toLowerCase().includes('gpt-5.6') || modelId.trim().toLowerCase().includes('gpt-6');
 }
 
 /**
  * Reasoning Effort (thinking depth)
  * Controls the depth of reasoning for AI models
  * Claude API values: low, medium, high, xhigh, max
- * Codex API values: low, medium, high, xhigh; GPT-5.6 also supports max
+ * Codex API values: low, medium, high, xhigh; GPT-5.6 and GPT-6 support max
+ * Grok CLI values: low, medium, high, xhigh
  */
 export type ReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
@@ -669,6 +796,9 @@ export type ReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
  * Standard uses Codex defaults; Fast maps to service_tier=fast at send time.
  */
 export type CodexFastMode = 'normal' | 'fast';
+
+/** Which key combination sends the message: plain Enter, or Cmd/Ctrl+Enter. */
+export type SendShortcut = 'enter' | 'cmdEnter';
 
 /**
  * Reasoning level information
@@ -771,6 +901,8 @@ export interface ChatInputBoxProps {
   permissionMode?: PermissionMode;
   /** Current provider */
   currentProvider?: string;
+  /** Whether the installed Codex SDK supports native auto review */
+  codexNativeAutoReviewAvailable?: boolean;
   /** Usage percentage */
   usagePercentage?: number;
   /** Used context tokens */
@@ -837,7 +969,7 @@ export interface ChatInputBoxProps {
   onStreamingEnabledChange?: (enabled: boolean) => void;
 
   /** Send shortcut setting: 'enter' = Enter sends | 'cmdEnter' = Cmd/Ctrl+Enter sends */
-  sendShortcut?: 'enter' | 'cmdEnter';
+  sendShortcut?: SendShortcut;
 
   /** Currently selected agent */
   selectedAgent?: SelectedAgent | null;
@@ -881,6 +1013,8 @@ export interface ChatInputBoxProps {
   messageQueue?: QueuedMessage[];
   /** Remove message from queue callback */
   onRemoveFromQueue?: (id: string) => void;
+  /** Reorder message queue callback (orderedIds[0] executes first) */
+  onReorderQueue?: (orderedIds: string[]) => void;
 
   /** Whether auto open file is enabled */
   autoOpenFileEnabled?: boolean;
@@ -910,6 +1044,8 @@ export interface ButtonAreaProps {
   permissionMode?: PermissionMode;
   /** Current provider */
   currentProvider?: string;
+  /** Whether the installed Codex SDK supports native auto review */
+  codexNativeAutoReviewAvailable?: boolean;
   /** Current reasoning effort */
   reasoningEffort?: ReasoningEffort;
   /** Codex speed mode */

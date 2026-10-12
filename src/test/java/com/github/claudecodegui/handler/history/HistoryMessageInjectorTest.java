@@ -27,6 +27,18 @@ import static org.junit.Assert.assertTrue;
 public class HistoryMessageInjectorTest {
 
     @Test
+    public void staleGenerationCannotPublishMessagesOrCompletion() {
+        HistoryMessageInjector injector = new HistoryMessageInjector(null);
+        long previous = injector.invalidateCodexHistory();
+        long current = injector.invalidateCodexHistory();
+        java.util.concurrent.atomic.AtomicInteger publications = new java.util.concurrent.atomic.AtomicInteger();
+        injector.publishIfCurrent(previous, publications::incrementAndGet);
+        assertEquals(0, publications.get());
+        injector.publishIfCurrent(current, publications::incrementAndGet);
+        assertEquals(1, publications.get());
+    }
+
+    @Test
     public void handleLoadSessionUsesPayloadProviderAndResolvedCodexSessionId() {
         RecordingHistoryMessageInjector injector = new RecordingHistoryMessageInjector(createContext("D:/project/demo"));
         boolean[] callbackInvoked = {false};

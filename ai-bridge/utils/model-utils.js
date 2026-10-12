@@ -32,6 +32,26 @@ export function mapModelIdToSdkName(modelId) {
 }
 
 /**
+ * Pick the `model` value handed to the Claude SDK for a request.
+ *
+ * Prefer the exact resolved id (e.g. 'claude-opus-4-6[1m]' or a provider
+ * mapping like 'MiniMax-M2.5') over the family alias from mapModelIdToSdkName.
+ * The alias ('opus') only works if the CLI can read ANTHROPIC_DEFAULT_OPUS_MODEL,
+ * but buildWebviewControlledSettingsOverride blanks that variable so stale
+ * settings.json values cannot leak in - which also blanks the per-request value
+ * and makes 'opus' silently resolve to the CLI's default Opus. Passing the
+ * exact id sidesteps env precedence entirely.
+ *
+ * @param {string|null} modelId - Original model ID from the webview
+ * @param {string|null} resolvedModelId - Output of resolveModelFromSettings
+ * @returns {string} Value for the SDK `model` option
+ */
+export function resolveSdkModelName(modelId, resolvedModelId) {
+  const exact = typeof resolvedModelId === 'string' ? resolvedModelId.trim() : '';
+  return exact || mapModelIdToSdkName(modelId);
+}
+
+/**
  * Resolve the actual model name for API calls from user's settings.json.
  * When the user configures a model mapping in their provider config (e.g. sonnet -> "MiniMax-M2.5"),
  * those values are written to ~/.claude/settings.json as ANTHROPIC_DEFAULT_*_MODEL env vars.
@@ -141,37 +161,6 @@ export function setModelEnvironmentVariables(modelId, baseModelId) {
     process.env.ANTHROPIC_DEFAULT_SONNET_MODEL = modelId;
     console.log('[MODEL_ENV] Set ANTHROPIC_DEFAULT_SONNET_MODEL =', modelId);
   }
-}
-
-/**
- * Determine whether the model natively supports Anthropic vision content blocks.
- *
- * Different models have different vision input capabilities:
- * - Claude models (claude-*): Support Anthropic's standard vision format
- *   via {type: "image", source: {type: "base64", media_type, data}}.
- * - Third-party models (mimo, deepseek, qwen, glm, etc.): Many do not properly
- *   handle Anthropic vision content blocks, especially when routed through
- *   third-party Anthropic-compatible proxies. The image blocks may be silently
- *   dropped during proxy translation, causing the model to report "no image attached".
- *
- * For non-Claude models, the caller should fall back to saving images as temp
- * files and referencing them in the message text, mimicking Claude Code CLI
- * behavior which uses the Read tool to load images from disk.
- *
- * @param {string} modelId - The resolved model name actually sent to the API.
- *                            Examples: "claude-sonnet-4-5", "mimo-v2.5-pro", "MiniMax-M2.5"
- * @returns {boolean} True if the model natively supports Anthropic vision blocks.
- */
-export function modelSupportsVision(modelId) {
-  if (!modelId || typeof modelId !== 'string') {
-    return true;
-  }
-  const lower = modelId.toLowerCase();
-  // Anchor to the canonical "claude-" prefix to avoid matching third-party
-  // model names that merely contain the substring "claude" (e.g.
-  // "claude-compatible-proxy"), which historically yielded false positives
-  // and dropped images for proxies that don't speak Anthropic vision blocks.
-  return lower.startsWith('claude-');
 }
 
 // Note: getClaudeCliPath() has been removed.

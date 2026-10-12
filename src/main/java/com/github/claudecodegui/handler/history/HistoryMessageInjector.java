@@ -34,6 +34,7 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
+import java.util.function.BooleanSupplier;
 
 /**
  * Service for loading session messages and injecting them into the frontend.
@@ -52,9 +53,34 @@ public class HistoryMessageInjector {
 
     private final HandlerContext context;
     private final AtomicLong sessionLoadGeneration = new AtomicLong();
+    private final CodexHistoryPageIndex codexPageIndex = new CodexHistoryPageIndex();
 
     HistoryMessageInjector(HandlerContext context) {
         this.context = context;
+        if (context != null && context.getProject() != null) {
+            com.intellij.openapi.util.Disposer.register(context.getProject(), this::invalidateCodexHistory);
+        }
+    }
+
+    long invalidateCodexHistory() {
+        long generation;
+        synchronized (sessionLoadGeneration) {
+            generation = sessionLoadGeneration.incrementAndGet();
+        }
+        try {
+            codexPageIndex.close();
+        } catch (IOException exception) {
+            LOG.warn("[HistoryHandler] Failed to clear Codex page index", exception);
+        }
+        return generation;
+    }
+
+    void publishIfCurrent(long generation, Runnable publication) {
+        synchronized (sessionLoadGeneration) {
+            if (generation == sessionLoadGeneration.get()) {
+                publication.run();
+            }
+        }
     }
 
     /**
@@ -62,7 +88,7 @@ public class HistoryMessageInjector {
      */
     void handleLoadSession(String sessionId, String currentProvider, HistoryHandler.SessionLoadCallback sessionLoadCallback) {
         // Every session selection invalidates asynchronous Codex loads from the previous selection.
-        sessionLoadGeneration.incrementAndGet();
+        invalidateCodexHistory();
         String provider = currentProvider;
         String resolvedSessionId = sessionId;
         String model = null;
@@ -122,33 +148,32 @@ public class HistoryMessageInjector {
     }
 
     void loadCodexSession(String sessionId, String model) {
-        long generation = sessionLoadGeneration.incrementAndGet();
+        long generation = invalidateCodexHistory();
         CompletableFuture.runAsync(() -> {
             LOG.info("[HistoryHandler] ========== 开始加载 Codex 会话 ==========");
             LOG.info("[HistoryHandler] SessionId: " + sessionId);
 
             try {
                 CodexHistoryReader codexReader = new CodexHistoryReader();
-                CodexHistoryPage page = scanCodexHistoryPage(
-                        codexReader, sessionId, null, HISTORY_USER_TURN_LIMIT);
-                if (generation != sessionLoadGeneration.get()) {
-                    LOG.info("[HistoryHandler] Discarding stale Codex session load: " + sessionId);
-                    return;
-                }
-                String threadIdToUse = page.threadId != null ? page.threadId : sessionId;
-                String cwd = page.cwd;
+                CodexHistoryPage page = codexPageIndex.read(
+                        codexReader, sessionId, null, HISTORY_USER_TURN_LIMIT,
+                        () -> generation == sessionLoadGeneration.get());
+                publishIfCurrent(generation, () -> {
+                    String threadIdToUse = page.threadId != null ? page.threadId : sessionId;
+                    String cwd = page.cwd;
 
-                context.getSession().setSessionInfo(threadIdToUse, cwd);
-                if (model != null && !model.isBlank()) {
-                    context.getSession().setModel(model.trim());
-                }
-                restoreCodexFrontendMessagesToSessionState(context.getSession().getState(), page.messages);
-                pushRestoredCodexUsage();
-                LOG.info("[HistoryHandler] 恢复 Codex 会话状态: threadId=" + threadIdToUse + " (from sessionId=" + sessionId + "), cwd=" + cwd);
+                    context.getSession().setSessionInfo(threadIdToUse, cwd);
+                    if (model != null && !model.isBlank()) {
+                        context.getSession().setModel(model.trim());
+                    }
+                    restoreCodexFrontendMessagesToSessionState(context.getSession().getState(), page.messages);
+                    pushRestoredCodexUsage();
+                    LOG.info("[HistoryHandler] 恢复 Codex 会话状态: threadId=" + threadIdToUse + " (from sessionId=" + sessionId + "), cwd=" + cwd);
 
-                injectCodexHistoryPage(sessionId, page, true);
+                    injectCodexHistoryPage(sessionId, page, true);
 
-                notifyHistoryLoadComplete();
+                    notifyHistoryLoadComplete(generation);
+                });
 
                 LOG.info("[HistoryHandler] ========== Codex 会话加载完成 ==========");
 
@@ -159,14 +184,14 @@ public class HistoryMessageInjector {
                 }
                 LOG.error("[HistoryHandler] 加载 Codex 会话失败: " + e.getMessage(), e);
 
-                ApplicationManager.getApplication().invokeLater(() -> {
+                ApplicationManager.getApplication().invokeLater(() -> publishIfCurrent(generation, () -> {
                     String errorMsg = context.escapeJs(e.getMessage() != null ? e.getMessage() : "未知错误");
                     String jsCode = "if (window.addErrorMessage) { " +
                                             "  window.addErrorMessage('加载 Codex 会话失败: " + errorMsg + "'); " +
                                             "}";
                     context.executeJavaScriptQueued(jsCode);
-                });
-                notifyHistoryLoadComplete();
+                }));
+                notifyHistoryLoadComplete(generation);
             }
         });
     }
@@ -187,32 +212,87 @@ public class HistoryMessageInjector {
                     throw new IllegalArgumentException("Invalid Codex history page cursor");
                 }
 
-                CodexHistoryPage page = scanCodexHistoryPage(
-                        new CodexHistoryReader(), sessionId, beforeTurn, HISTORY_USER_TURN_LIMIT);
-                String activeSessionId = context.getSession() != null
-                        ? context.getSession().getSessionId() : null;
-                boolean activeSessionMatches = sessionId.equals(activeSessionId)
-                        || (page.threadId != null && page.threadId.equals(activeSessionId));
-                if (generation != sessionLoadGeneration.get() || !activeSessionMatches) {
-                    LOG.info("[HistoryHandler] Discarding stale Codex history page: " + sessionId);
+                CodexHistoryPage page = codexPageIndex.read(
+                        new CodexHistoryReader(), sessionId, beforeTurn, HISTORY_USER_TURN_LIMIT,
+                        () -> generation == sessionLoadGeneration.get());
+                String requestedSessionId = sessionId;
+                publishIfCurrent(generation, () -> {
+                    String activeSessionId = context.getSession() != null
+                            ? context.getSession().getSessionId() : null;
+                    boolean activeSessionMatches = requestedSessionId.equals(activeSessionId)
+                            || (page.threadId != null && page.threadId.equals(activeSessionId));
+                    if (!activeSessionMatches) {
+                        LOG.info("[HistoryHandler] Discarding stale Codex history page: " + requestedSessionId);
+                        return;
+                    }
+                    boolean replace = page.cursorReset;
+                    if (replace) {
+                        restoreCodexFrontendMessagesToSessionState(context.getSession().getState(), page.messages);
+                        pushRestoredCodexUsage();
+                    }
+                    injectCodexHistoryPage(requestedSessionId, page, replace);
+                    notifyCodexHistoryPageRenderComplete();
+                });
+            } catch (Exception e) {
+                if (generation != sessionLoadGeneration.get()) {
                     return;
                 }
-                boolean replace = page.cursorReset;
-                if (replace) {
-                    restoreCodexFrontendMessagesToSessionState(context.getSession().getState(), page.messages);
-                    pushRestoredCodexUsage();
-                }
-                injectCodexHistoryPage(sessionId, page, replace);
-                notifyCodexHistoryPageRenderComplete();
-            } catch (Exception e) {
                 LOG.error("[HistoryHandler] 加载更早 Codex 历史失败: " + e.getMessage(), e);
-                notifyCodexHistoryPageError(sessionId, beforeTurn, e.getMessage());
+                String failedSessionId = sessionId;
+                Integer failedBeforeTurn = beforeTurn;
+                publishIfCurrent(generation, () -> notifyCodexHistoryPageError(failedSessionId, failedBeforeTurn, e.getMessage()));
             }
         });
     }
 
     private void notifyCodexHistoryPageRenderComplete() {
         context.callJavaScript("codexHistoryPageRenderComplete");
+    }
+
+    /**
+     * Load an earlier page of Claude history and prepend to the current session.
+     * Called when the user scrolls to the top of the message list.
+     */
+    void loadEarlierClaudeHistoryPage(String content) {
+        CompletableFuture.runAsync(() -> {
+            String sessionId = null;
+            Integer beforeTurn = null;
+            try {
+                JsonObject request = new Gson().fromJson(content, JsonObject.class);
+                if (request == null || !request.has("sessionId") || !request.has("beforeTurn")) {
+                    throw new IllegalArgumentException("Invalid Claude history page request");
+                }
+                sessionId = request.get("sessionId").getAsString();
+                beforeTurn = request.get("beforeTurn").getAsInt();
+                if (sessionId.isBlank() || sessionId.length() > 200 || beforeTurn < 0) {
+                    throw new IllegalArgumentException("Invalid Claude history page cursor");
+                }
+
+                // Delegate to the session orchestrator which handles the actual pagination
+                ClaudeSession session = context.getSession();
+                if (session != null && sessionId.equals(session.getSessionId())) {
+                    String cwd = context.getProject() != null ? context.getProject().getBasePath() : null;
+                    session.getOrchestrator().loadEarlierClaudeHistoryPage(sessionId, cwd, beforeTurn);
+                } else {
+                    LOG.warn("[HistoryHandler] Claude history page request for inactive session: " + sessionId);
+                }
+            } catch (Exception e) {
+                LOG.error("[HistoryHandler] Failed to load earlier Claude history page: " + e.getMessage(), e);
+                notifyClaudeHistoryPageError(sessionId, beforeTurn, e.getMessage());
+            }
+        });
+    }
+
+    private void notifyClaudeHistoryPageError(String sessionId, Integer beforeTurn, String errorMessage) {
+        JsonObject error = new JsonObject();
+        if (sessionId != null) {
+            error.addProperty("sessionId", sessionId);
+        }
+        if (beforeTurn != null) {
+            error.addProperty("beforeTurn", beforeTurn);
+        }
+        error.addProperty("message", errorMessage != null ? errorMessage : "Unknown error");
+        context.callJavaScript("claudeHistoryPageError", context.escapeJs(new Gson().toJson(error)));
     }
 
     private void pushRestoredCodexUsage() {
@@ -268,7 +348,25 @@ public class HistoryMessageInjector {
         return page;
     }
 
-    private static void extractSessionMeta(JsonObject rawMessage, CodexHistoryPage page) {
+    static CodexHistoryPage scanCodexHistoryPageUncached(CodexHistoryReader reader, String sessionId,
+                                                        Integer beforeTurn, int pageSize,
+                                                        BooleanSupplier active) throws IOException {
+        CodexTurnPageCollector collector = new CodexTurnPageCollector(beforeTurn, pageSize);
+        CodexFrontendMessageAccumulator accumulator = new CodexFrontendMessageAccumulator(collector::accept);
+        CodexHistoryPage page = new CodexHistoryPage();
+        Path file = reader.resolveSessionFile(sessionId);
+        long size = Files.size(file);
+        page.rawRecordCount = reader.forEachSessionMessage(file, 0, size, active, raw -> {
+            extractSessionMeta(raw, page);
+            accumulator.accept(raw);
+        });
+        page.sourceBytesRead = size;
+        accumulator.finish();
+        collector.finish(page);
+        return page;
+    }
+
+    static void extractSessionMeta(JsonObject rawMessage, CodexHistoryPage page) {
         if (!"session_meta".equals(getStringProperty(rawMessage, "type"))
                 || !rawMessage.has("payload") || !rawMessage.get("payload").isJsonObject()) {
             return;
@@ -288,6 +386,7 @@ public class HistoryMessageInjector {
         int toTurn;
         int totalTurns;
         int rawRecordCount;
+        long sourceBytesRead;
         boolean cursorReset;
         String threadId;
         String cwd;
@@ -381,7 +480,11 @@ public class HistoryMessageInjector {
     }
 
     void notifyHistoryLoadComplete() {
-        ApplicationManager.getApplication().invokeLater(() -> {
+        notifyHistoryLoadComplete(sessionLoadGeneration.get());
+    }
+
+    private void notifyHistoryLoadComplete(long generation) {
+        ApplicationManager.getApplication().invokeLater(() -> publishIfCurrent(generation, () -> {
             String jsCode = "if (window.historyLoadComplete) { " +
                                     "  try { " +
                                     "    window.historyLoadComplete(); " +
@@ -390,7 +493,7 @@ public class HistoryMessageInjector {
                                     "  } " +
                                     "}";
             context.executeJavaScriptQueued(jsCode);
-        });
+        }));
     }
 
     /**
@@ -579,16 +682,22 @@ public class HistoryMessageInjector {
         return message.getAsJsonObject("payload");
     }
 
-    private static final class CodexFrontendMessageAccumulator {
+    static final class CodexFrontendMessageAccumulator {
         private final Consumer<JsonObject> consumer;
+        private final Consumer<JsonObject> usageUpdated;
         private JsonObject pending;
         private JsonObject latestAssistant;
 
         private CodexFrontendMessageAccumulator(Consumer<JsonObject> consumer) {
-            this.consumer = consumer;
+            this(consumer, message -> { });
         }
 
-        private void accept(JsonObject rawMessage) {
+        CodexFrontendMessageAccumulator(Consumer<JsonObject> consumer, Consumer<JsonObject> usageUpdated) {
+            this.consumer = consumer;
+            this.usageUpdated = usageUpdated;
+        }
+
+        void accept(JsonObject rawMessage) {
             JsonObject usage = extractCodexTokenCountUsage(rawMessage);
             if (usage != null) {
                 attachUsageToLatestAssistant(usage);
@@ -646,6 +755,24 @@ public class HistoryMessageInjector {
                 latestAssistant.add("raw", raw);
             }
             raw.add("usage", usage.deepCopy());
+            usageUpdated.accept(latestAssistant);
+        }
+
+        JsonObject pendingMessage() {
+            if (pending == null) {
+                return null;
+            }
+            JsonObject message = pending.deepCopy();
+            message.remove(CODEX_RECORD_KIND);
+            return message;
+        }
+
+        long retainedBytes() {
+            long size = pending == null ? 0 : pending.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+            if (latestAssistant != null && latestAssistant != pending) {
+                size += latestAssistant.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+            }
+            return size;
         }
 
         private void finish() {
@@ -719,7 +846,7 @@ public class HistoryMessageInjector {
         return "user".equals(getStringProperty(message, "type"));
     }
 
-    private static String getStringProperty(JsonObject object, String propertyName) {
+    static String getStringProperty(JsonObject object, String propertyName) {
         if (object == null
                 || !object.has(propertyName)
                 || object.get(propertyName).isJsonNull()
@@ -758,16 +885,19 @@ public class HistoryMessageInjector {
 
     private static void restoreCodexFrontendMessagesToSessionState(SessionState state,
                                                                     List<JsonObject> frontendMessages) {
-        state.clearMessages();
+        List<ClaudeSession.Message> restoredMessages = new ArrayList<>(frontendMessages.size());
         for (JsonObject frontendMsg : frontendMessages) {
             ClaudeSession.Message restoredMessage = toSessionMessage(frontendMsg);
             if (restoredMessage != null) {
-                state.addMessage(restoredMessage);
+                restoredMessages.add(restoredMessage);
             }
+        }
+        synchronized (state.getMessageStateLock()) {
+            state.replaceMessages(restoredMessages);
         }
     }
 
-    private static boolean isHumanUserMessage(JsonObject message) {
+    static boolean isHumanUserMessage(JsonObject message) {
         if (!isUserMessage(message)) {
             return false;
         }

@@ -4,8 +4,8 @@ import type { ButtonAreaProps, CodexFastMode, ModelInfo, PermissionMode, Reasoni
 import { DEFAULT_CLAUDE_MODEL_ID } from './types';
 import { ConfigSelect, ModeSelect, ModelConfigSelect, ProviderSelect } from './selectors';
 import { STORAGE_KEYS, validateCodexCustomModels } from '../../types/provider';
-import type { CodexCustomModel } from '../../types/provider';
 import { readClaudeModelMapping } from '../../utils/claudeModelMapping';
+import { readCustomClaudeModels } from '../../utils/customClaudeModels';
 import { useCliModels, useOmpRoles } from '../../hooks/providers/useCliModels';
 import { useToolbarSelectorCompact } from './hooks/useToolbarSelectorCompact';
 import { resolveProviderModels } from './resolveProviderModels';
@@ -37,35 +37,6 @@ function getCustomCodexModels(): ModelInfo[] {
 }
 
 /**
- * Get custom Claude model list from localStorage
- * Uses runtime type validation for data safety
- */
-function getCustomClaudeModels(): ModelInfo[] {
-  if (typeof window === 'undefined' || !window.localStorage) {
-    return [];
-  }
-  try {
-    const stored = window.localStorage.getItem(STORAGE_KEYS.CLAUDE_CUSTOM_MODELS);
-    if (!stored) {
-      return [];
-    }
-    const parsed = JSON.parse(stored) as CodexCustomModel[];
-    if (!Array.isArray(parsed)) {
-      return [];
-    }
-    return parsed
-      .filter((m): m is CodexCustomModel => !!m && typeof m === 'object' && typeof m.id === 'string' && m.id.trim().length > 0)
-      .map(m => ({
-        id: m.id,
-        label: m.label || m.id,
-        description: m.description,
-      }));
-  } catch {
-    return [];
-  }
-}
-
-/**
  * ButtonArea - Bottom toolbar component
  * Contains mode selector, model selector, attachment button, prompt enhancer button, send/stop button
  */
@@ -77,6 +48,7 @@ export const ButtonArea = ({
   selectedModel = DEFAULT_CLAUDE_MODEL_ID,
   permissionMode = 'default',
   currentProvider = 'claude',
+  codexNativeAutoReviewAvailable = true,
   reasoningEffort = 'high',
   dshPreset = '',
   codexFastMode = 'normal',
@@ -149,7 +121,7 @@ export const ButtonArea = ({
       provider: currentProvider,
       cliModels,
       cliCatalogHasEntries,
-      claudeCustomModels: getCustomClaudeModels(),
+      claudeCustomModels: readCustomClaudeModels(),
       codexCustomModels: getCustomCodexModels(),
       claudeMapping,
     });
@@ -159,7 +131,9 @@ export const ButtonArea = ({
 
   // When a dynamic model catalog arrives, ensure selection is a real entry.
   useEffect(() => {
-    const isDynamicProvider = currentProvider === 'kimi' || currentProvider === 'opencode'
+    const isDynamicProvider = currentProvider === 'kimi' || currentProvider === 'minimax'
+      || currentProvider === 'zcode'
+      || currentProvider === 'opencode'
       || currentProvider === 'pi' || currentProvider === 'codex'
       || currentProvider === 'grok' || currentProvider === 'omp'
       || currentProvider === 'dsh';
@@ -300,7 +274,12 @@ export const ButtonArea = ({
           onOpenCliSettings={onOpenCliSettings}
           compact
         />
-        <ModeSelect value={permissionMode} onChange={handleModeSelect} provider={currentProvider} />
+        <ModeSelect
+          value={permissionMode}
+          onChange={handleModeSelect}
+          provider={currentProvider}
+          codexNativeAutoReviewAvailable={codexNativeAutoReviewAvailable}
+        />
         <ModelConfigSelect
           selectedModel={selectedModel}
           onModelSelect={handleModelSelect}
@@ -331,6 +310,7 @@ export const ButtonArea = ({
           onClick={handleEnhanceClick}
           disabled={disabled || !hasInputContent || isLoading || isEnhancing}
           data-tooltip={`${t('promptEnhancer.tooltip')} (${t('promptEnhancer.shortcut')})`}
+          aria-label={t('promptEnhancer.tooltip')}
         >
           <span className={`codicon ${isEnhancing ? 'codicon-loading codicon-modifier-spin' : 'codicon-sparkle'}`} />
         </button>

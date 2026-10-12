@@ -334,6 +334,7 @@
       "retryAttempts": "Retry attempts",
       "catalogColumns": "Cards per row",
       "catalogPageSize": "Items per page",
+      "catalogSort": "Sort order",
       "pageSizeOption": "{{count}} per page",
       "pageJump": "Go to",
       "goToPage": "Go to page",
@@ -482,7 +483,9 @@
           "kimi": "Kimi CLI",
           "opencode": "OpenCode",
           "pi": "PI CLI",
-          "omp": "OMP CLI"
+          "omp": "OMP CLI",
+          "minimax": "MiniMax Code",
+          "zcode": "ZCode"
         },
         "currentProviderAuto": "Currently using automatic selection: {{provider}}",
         "currentProviderManual": "Currently using manually selected provider: {{provider}}",
@@ -638,6 +641,14 @@
       "copied": "Copied to clipboard",
       "copyFailed": "Failed to copy",
       "tools": {
+        "minimax": {
+          "name": "MiniMax Code",
+          "description": "MiniMax terminal coding agent. Requires Node.js 22.19+ / 24+ (not 23); commands: minimax / mcode"
+        },
+        "zcode": {
+          "name": "ZCode",
+          "description": "Zhipu ZCode desktop coding app with GLM models"
+        },
         "grok": {
           "name": "Grok CLI",
           "description": "xAI Grok terminal coding agent"
@@ -1551,8 +1562,12 @@
     "quoteSuccess": "Quoted!"
   },
   "contextMenu": {
+    "cut": "Cut",
     "copy": "Copy",
-    "quote": "Quote"
+    "paste": "Paste",
+    "newline": "Insert Newline",
+    "quote": "Quote",
+    "copyLink": "Copy Link Address"
   },
   "usage": {
     "checkingLabel": "Checking for tokentracker-cli…",
@@ -1802,7 +1817,32 @@
     "bashGroupFailed": "failed",
     "promptLabel": "Prompt",
     "updatePlan": "Update Plan",
-    "applyPatch": "Apply Patch"
+    "applyPatch": "Apply Patch",
+    "reportFindings": {
+      "title": "Report Findings",
+      "findingsCount_one": "{{count}} finding",
+      "findingsCount_other": "{{count}} findings",
+      "confirmedCount_one": "{{count}} confirmed",
+      "confirmedCount_other": "{{count}} confirmed",
+      "plausibleCount_one": "{{count}} to review",
+      "plausibleCount_other": "{{count}} to review",
+      "confirmed": "Confirmed",
+      "plausible": "To review",
+      "fixed": "Fixed",
+      "skipped": "Skipped",
+      "noChangeNeeded": "No change needed",
+      "empty": "No findings",
+      "summaryLabel": "Review summary",
+      "summary": "Summary",
+      "failureScenario": "Failure scenario",
+      "reviewLevel": "Review level: {{level}}",
+      "openFile": "Open {{filePath}}",
+      "expandFinding": "Expand finding",
+      "collapseFinding": "Collapse finding",
+      "expandReport": "Expand findings report",
+      "collapseReport": "Collapse findings report",
+      "untitled": "Untitled finding"
+    }
   },
   "todo": {
     "inProgress": "In Progress {{completed}}/{{total}} tasks",
@@ -2026,11 +2066,15 @@
   "models": {
     "addModel": "Add Model",
     "searchPlaceholder": "Search models",
+    "clearSearch": "Clear search",
     "noModelsFound": "No models found",
+    "noSearchMatches": "No models match \"{{query}}\"",
     "hiddenModelCount": "+ {{count}} more models. Type to search.",
     "pinned": "Pinned",
     "pin": "Pin",
     "unpin": "Unpin",
+    "retiredBadge": "Retired",
+    "retiredCustomHint": "This model id is no longer served by the API. It is sent as-is because you added it as a custom model.",
     "longContext": {
       "label": "1M",
       "shortLabel": "1M context",
@@ -2046,9 +2090,17 @@
         "label": "Sonnet 5",
         "description": "Sonnet 5 · Use the default model"
       },
+      "sonnet55": {
+        "label": "Sonnet 5.5",
+        "description": "Sonnet 5.5 · Latest Sonnet upgrade"
+      },
+      "opus55": {
+        "label": "Opus 5.5",
+        "description": "Opus 5.5 · Latest Opus upgrade"
+      },
       "opus5": {
         "label": "Opus 5",
-        "description": "Opus 5 · Latest Opus upgrade"
+        "description": "Opus 5 · Previous Opus generation"
       },
       "opus46_1m": {
         "label": "Opus 4.6",
@@ -2058,16 +2110,28 @@
         "label": "Haiku 4.5",
         "description": "Haiku 4.5 · Fastest for quick answers"
       },
-      "opus48": {
-        "label": "Opus 4.8",
-        "description": "Opus 4.8 · Previous Opus generation"
+      "fable51": {
+        "label": "Fable 5.1",
+        "description": "Fable 5.1 · Most powerful · Mythos-class"
       },
       "fable5": {
         "label": "Fable 5",
-        "description": "Fable 5 · Most powerful · Mythos-class"
+        "description": "Fable 5 · Previous Fable generation"
       }
     },
     "codex": {
+      "gpt6astra": {
+        "label": "GPT-6 Astra",
+        "description": "New-generation flagship for autonomous computer use and long agentic tasks."
+      },
+      "gpt61sol": {
+        "label": "GPT-6.1 Sol",
+        "description": "GPT-6.1 frontier model for complex professional work."
+      },
+      "gpt6sol": {
+        "label": "GPT-6 Sol",
+        "description": "GPT-6 frontier model for complex professional work."
+      },
       "gpt56sol": {
         "label": "GPT-5.6 Sol",
         "description": "Frontier model for complex professional work."
@@ -2075,6 +2139,10 @@
       "gpt56terra": {
         "label": "GPT-5.6 Terra",
         "description": "GPT-5.6 model that balances intelligence and cost."
+      },
+      "gpt6luna": {
+        "label": "GPT-6 Luna",
+        "description": "GPT-6 model optimized for cost-sensitive workloads."
       },
       "gpt56luna": {
         "label": "GPT-5.6 Luna",
@@ -2124,9 +2192,15 @@
       "tooltip": "Automatically accept file edits",
       "description": "Automatically accept file creation/editing, reducing confirmation steps"
     },
-    "bypassPermissions": {
+    "auto": {
       "label": "Auto Mode",
       "shortLabel": "Auto",
+      "tooltip": "Let the provider review approval requests automatically",
+      "description": "Uses the provider-native reviewer while retaining safety boundaries"
+    },
+    "bypassPermissions": {
+      "label": "Full Auto",
+      "shortLabel": "Full Auto",
       "tooltip": "Bypass all permission checks",
       "description": "Fully automated, bypassing all permission checks [Use with caution]"
     }
@@ -2147,6 +2221,12 @@
       "label": "Auto Edit",
       "tooltip": "Codex approval_policy=on-request – asks for approval when needed",
       "description": "Balanced option. Allows normal editing flow while still requiring approvals when needed."
+    },
+    "auto": {
+      "label": "Approve for me",
+      "shortLabel": "Auto",
+      "tooltip": "Codex approvals_reviewer=auto_review – an automatic reviewer handles eligible approval requests.",
+      "description": "Keeps the workspace-write sandbox and escalates requests the reviewer cannot approve."
     },
     "bypassPermissions": {
       "label": "Full Auto",
@@ -2188,6 +2268,12 @@
     },
     "kimi": {
       "label": "Kimi CLI"
+    },
+    "minimax": {
+      "label": "MiniMax Code"
+    },
+    "zcode": {
+      "label": "ZCode"
     },
     "gemini": {
       "label": "Gemini Cli"
@@ -2405,6 +2491,11 @@
     "copied": "Copied",
     "openDependencySettings": "Open Dependency Settings",
     "recommended": "Recommended",
+    "codexWriterConflict": {
+      "title": "Codex thread is busy",
+      "intro": "When the new turn started, the previous turn's Codex process was still writing to this thread. The plugin now stops the previous turn automatically before sending.",
+      "reason": "Wait a few seconds and resend the message — there is no need to create a new session."
+    },
     "codexThreadResume": {
       "title": "Session thread is no longer valid",
       "intro": "Creating a new session will resolve this issue. The thread ID for the current session no longer exists on the Codex server.",

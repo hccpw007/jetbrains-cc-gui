@@ -17,6 +17,8 @@ import { normalizeToolName } from './toolConstants';
 const WRITE_TOOL_NAMES = new Set(['write', 'write_file', 'create_file', 'write_to_file']);
 
 export interface LedgerOp {
+  sourceId?: string;
+  toolUseId?: string;
   filePath: string;
   toolName: string;
   oldString: string;
@@ -26,6 +28,22 @@ export interface LedgerOp {
   agentId: string;
   lineStart?: number;
   lineEnd?: number;
+}
+
+export function sameLedgerOps(previous: LedgerOp[], next: LedgerOp[]): boolean {
+  return previous === next || (previous.length === next.length && previous.every((op, index) => {
+    const other = next[index];
+    return op.toolUseId === other.toolUseId
+      && op.sourceId === other.sourceId
+      && op.filePath === other.filePath
+      && op.toolName === other.toolName
+      && op.oldString === other.oldString
+      && op.newString === other.newString
+      && op.replaceAll === other.replaceAll
+      && op.agentId === other.agentId
+      && op.lineStart === other.lineStart
+      && op.lineEnd === other.lineEnd;
+  }));
 }
 
 export interface SessionFileLedgerEntry {
@@ -288,7 +306,10 @@ export function buildSessionFileLedger(ops: LedgerOp[]): SessionFileLedgerEntry[
       current = '';
     }
 
-    const agentIds = [...new Set(fileOps.map((o) => o.agentId || 'main').filter(Boolean))];
+    const agentIds = [...new Set(fileOps.flatMap((o) => {
+      const id = o.agentId || 'main';
+      return id ? [id] : [];
+    }))];
     const multiAgent = agentIds.length >= 2;
     const status = determineStatus(fileOps, reconstructed.fullyApplied ? baseline : fileOps[0]?.oldString ?? '');
     const firstLine = fileOps.find((o) => typeof o.lineStart === 'number');

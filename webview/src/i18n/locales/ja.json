@@ -240,7 +240,9 @@
           "kimi": "Kimi CLI",
           "opencode": "OpenCode",
           "pi": "PI CLI",
-          "omp": "OMP CLI"
+          "omp": "OMP CLI",
+          "minimax": "MiniMax Code",
+          "zcode": "ZCode"
         },
         "currentProviderAuto": "Currently using automatic selection: {{provider}}",
         "currentProviderManual": "Currently using manually selected provider: {{provider}}",
@@ -857,6 +859,14 @@
       "copied": "Copied to clipboard",
       "copyFailed": "Failed to copy",
       "tools": {
+        "minimax": {
+          "name": "MiniMax Code",
+          "description": "MiniMax ターミナルコーディングエージェント。Node.js 22.19+ / 24+（23 は不可）が必要。コマンド: minimax / mcode"
+        },
+        "zcode": {
+          "name": "ZCode",
+          "description": "GLM モデルを搭載した Zhipu ZCode デスクトップコーディングアプリ"
+        },
         "grok": {
           "name": "Grok CLI",
           "description": "xAI Grok terminal coding agent"
@@ -1106,8 +1116,12 @@
     "quoteSuccess": "引用しました!"
   },
   "contextMenu": {
+    "cut": "切り取り",
     "copy": "コピー",
-    "quote": "引用"
+    "paste": "貼り付け",
+    "newline": "改行を挿入",
+    "quote": "引用",
+    "copyLink": "リンクアドレスをコピー"
   },
   "usage": {
     "checkingLabel": "tokentracker-cli を確認しています…",
@@ -1352,7 +1366,32 @@
     "bashGroupBatchExecution": "Batch Execution",
     "bashGroupCompleted": "completed",
     "bashGroupAllCompleted": "All Completed",
-    "bashGroupFailed": "failed"
+    "bashGroupFailed": "failed",
+    "reportFindings": {
+      "title": "レビュー指摘",
+      "findingsCount_one": "{{count}} 件の指摘",
+      "findingsCount_other": "{{count}} 件の指摘",
+      "confirmedCount_one": "確認済み {{count}} 件",
+      "confirmedCount_other": "確認済み {{count}} 件",
+      "plausibleCount_one": "要確認 {{count}} 件",
+      "plausibleCount_other": "要確認 {{count}} 件",
+      "confirmed": "確認済み",
+      "plausible": "要確認",
+      "fixed": "修正済み",
+      "skipped": "スキップ",
+      "noChangeNeeded": "修正不要",
+      "empty": "指摘はありません",
+      "summaryLabel": "レビュー概要",
+      "summary": "概要",
+      "failureScenario": "発生シナリオ",
+      "reviewLevel": "レビューレベル: {{level}}",
+      "openFile": "{{filePath}} を開く",
+      "expandFinding": "指摘の詳細を展開",
+      "collapseFinding": "指摘の詳細を折りたたむ",
+      "expandReport": "レビュー指摘を展開",
+      "collapseReport": "レビュー指摘を折りたたむ",
+      "untitled": "無題の指摘"
+    }
   },
   "todo": {
     "inProgress": "進行中 {{completed}}/{{total}} タスク",
@@ -1553,11 +1592,15 @@
   "models": {
     "addModel": "モデル追加",
     "searchPlaceholder": "モデルを検索",
+    "clearSearch": "検索をクリア",
     "noModelsFound": "モデルが見つかりません",
+    "noSearchMatches": "「{{query}}」に一致するモデルはありません",
     "hiddenModelCount": "+ {{count}} 件のモデルがあります。入力して検索してください。",
     "pinned": "ピン留め",
     "pin": "ピン留め",
     "unpin": "ピンを外す",
+    "retiredBadge": "提供終了",
+    "retiredCustomHint": "このモデル ID は API で提供されなくなりました。カスタムモデルとして追加されているため、置き換えずにそのまま送信します。",
     "longContext": {
       "label": "1M",
       "shortLabel": "1Mコンテキスト",
@@ -1573,9 +1616,17 @@
         "label": "Sonnet 5",
         "description": "Sonnet 5 · デフォルトモデルを使用"
       },
+      "sonnet55": {
+        "label": "Sonnet 5.5",
+        "description": "Sonnet 5.5 · 最新の Sonnet アップグレード"
+      },
+      "opus55": {
+        "label": "Opus 5.5",
+        "description": "Opus 5.5 · 最新の Opus アップグレード"
+      },
       "opus5": {
         "label": "Opus 5",
-        "description": "Opus 5 · 最新の Opus アップグレード"
+        "description": "Opus 5 · 前世代の Opus モデル"
       },
       "opus46_1m": {
         "label": "Opus 4.6",
@@ -1585,16 +1636,28 @@
         "label": "Haiku 4.5",
         "description": "Haiku 4.5 · 迅速な回答に最速"
       },
-      "opus48": {
-        "label": "Opus 4.8",
-        "description": "Opus 4.8 · 前世代の Opus モデル"
+      "fable51": {
+        "label": "Fable 5.1",
+        "description": "Fable 5.1 · 最も強力 · Mythosクラス"
       },
       "fable5": {
         "label": "Fable 5",
-        "description": "Fable 5 · 最も強力 · Mythosクラス"
+        "description": "Fable 5 · 前世代の Fable モデル"
       }
     },
     "codex": {
+      "gpt6astra": {
+        "label": "GPT-6 Astra",
+        "description": "自律的なコンピュータ操作と長時間のエージェントタスク向けの新世代フラッグシップ"
+      },
+      "gpt61sol": {
+        "label": "GPT-6.1 Sol",
+        "description": "複雑なプロフェッショナル業務向けの GPT-6.1 フロンティアモデル"
+      },
+      "gpt6sol": {
+        "label": "GPT-6 Sol",
+        "description": "複雑なプロフェッショナル業務向けの GPT-6 フロンティアモデル"
+      },
       "gpt56sol": {
         "label": "GPT-5.6 Sol",
         "description": "複雑なプロフェッショナル業務向けのフロンティアモデル"
@@ -1602,6 +1665,10 @@
       "gpt56terra": {
         "label": "GPT-5.6 Terra",
         "description": "知能とコストのバランスに優れた GPT-5.6 モデル"
+      },
+      "gpt6luna": {
+        "label": "GPT-6 Luna",
+        "description": "コスト重視のワークロードに最適化された GPT-6 モデル"
       },
       "gpt56luna": {
         "label": "GPT-5.6 Luna",
@@ -1633,8 +1700,15 @@
       "tooltip": "ファイル編集を自動的に承認",
       "description": "ファイルの作成/編集を自動的に承認し、確認手順を削減"
     },
+    "auto": {
+      "label": "自動承認モード",
+      "shortLabel": "自動承認",
+      "tooltip": "プロバイダーのネイティブ審査に承認リクエストを自動処理させます",
+      "description": "安全境界を維持しながらプロバイダーのネイティブ審査を使用します"
+    },
     "bypassPermissions": {
-      "label": "自動モード",
+      "label": "完全自動",
+      "shortLabel": "完全自動",
       "tooltip": "すべての権限チェックをバイパス",
       "description": "完全自動、すべての権限チェックをバイパス[注意して使用]"
     }
@@ -1654,6 +1728,12 @@
       "label": "Auto Edit",
       "tooltip": "Codex approval_policy=on-request – asks for approval when needed",
       "description": "Balanced option. Allows normal editing flow while still requiring approvals when needed."
+    },
+    "auto": {
+      "label": "代わりに承認",
+      "shortLabel": "自動承認",
+      "tooltip": "Codex approvals_reviewer=auto_review – 自動審査が対象の承認リクエストを処理します。",
+      "description": "workspace-write サンドボックスを維持し、承認できないリクエストはエスカレーションします。"
     },
     "bypassPermissions": {
       "label": "Full Auto",
@@ -1689,6 +1769,12 @@
     },
     "codex": {
       "label": "Codex"
+    },
+    "minimax": {
+      "label": "MiniMax Code"
+    },
+    "zcode": {
+      "label": "ZCode"
     },
     "gemini": {
       "label": "Gemini Cli"
@@ -1839,6 +1925,11 @@
     "copied": "コピー済み",
     "openDependencySettings": "依存関係管理を開く",
     "recommended": "推奨",
+    "codexWriterConflict": {
+      "title": "Codex スレッドが使用中",
+      "intro": "新しいターンの開始時、前のターンの Codex プロセスがまだこのスレッドに書き込んでいました。プラグインは送信前に前のターンを自動停止するようになりました。",
+      "reason": "数秒待ってからメッセージを再送してください。新しいセッションを作る必要はありません。"
+    },
     "codexThreadResume": {
       "title": "セッションスレッドが無効です",
       "intro": "新しいセッションを作成することでこの問題を解決できます。現在のセッションのスレッド ID は Codex サーバーに存在しなくなりました。",

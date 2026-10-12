@@ -1,6 +1,7 @@
 import { useCallback, type RefObject } from 'react';
 import type { TFunction } from 'i18next';
 import { sendBridgeEvent } from '../utils/bridge';
+import { markPendingStreamStart } from '../utils/streamLifecycle';
 import type { ClaudeContentBlock, ClaudeMessage } from '../types';
 import {
   EFFORT_SUPPORTED_CLAUDE_MODELS,
@@ -43,6 +44,7 @@ export interface UseMessageSenderOptions {
   permissionMode: PermissionMode;
   reasoningEffort: ReasoningEffort;
   codexFastMode: CodexFastMode;
+  codexNativeAutoReviewAvailable: boolean;
   dshPreset?: string;
   selectedAgent: SelectedAgent | null;
   sdkStatusLoading: boolean;
@@ -77,6 +79,7 @@ export function useMessageSender({
   permissionMode,
   reasoningEffort,
   codexFastMode,
+  codexNativeAutoReviewAvailable,
   dshPreset,
   selectedAgent,
   sdkStatusLoading,
@@ -257,7 +260,9 @@ export function useMessageSender({
     requestedPermissionMode: PermissionMode
   ) => {
     const hasAttachments = Array.isArray(attachments) && attachments.length > 0;
-    const effectivePermissionMode: PermissionMode = currentProvider === 'codex' && requestedPermissionMode === 'plan'
+    const effectivePermissionMode: PermissionMode = currentProvider === 'codex'
+      && (requestedPermissionMode === 'plan'
+        || (requestedPermissionMode === 'auto' && !codexNativeAutoReviewAvailable))
       ? 'default'
       : requestedPermissionMode;
     console.debug('[ModeSync][Frontend] send request mode', {
@@ -312,7 +317,7 @@ export function useMessageSender({
       });
       sendBridgeEvent('send_message', payload);
     }
-  }, [codexFastMode, currentProvider, dshPreset, selectedModel, reasoningEffort]);
+  }, [codexFastMode, codexNativeAutoReviewAvailable, currentProvider, dshPreset, selectedModel, reasoningEffort]);
 
   /**
    * Execute message sending (from queue or directly)
@@ -324,8 +329,9 @@ export function useMessageSender({
 
     if (!text && !hasAttachments) return;
 
-    // Check SDK status
-    if (sdkStatusLoading) {
+    // Same gate as the input box: a provider that is already installed must
+    // not wait on the shared Claude/Codex SDK query.
+    if (sdkStatusLoading && !currentSdkInstalled) {
       addToast(t('chat.sdkStatusLoading'), 'info');
       return;
     }
@@ -374,6 +380,10 @@ export function useMessageSender({
     // Set loading state
     setLoading(true);
     setLoadingStartTime(Date.now());
+    // Arm the pending-stream-start marker: until this turn's [STREAM_START]
+    // (or an error snapshot) arrives, late backend cleanup echoes from a just
+    // interrupted turn must not reset the loading state (see streamLifecycle.ts).
+    markPendingStreamStart();
 
     // Scroll to bottom
     userPausedRef.current = false;

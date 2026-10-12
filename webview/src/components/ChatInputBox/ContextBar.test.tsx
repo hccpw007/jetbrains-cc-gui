@@ -3,7 +3,6 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { ContextBar } from './ContextBar';
 
 const createProps = (): ComponentProps<typeof ContextBar> => ({
-  t: ((key: string) => key) as never,
   onAddAttachment: vi.fn(),
   onClearAgent: vi.fn(),
   showUsage: false,

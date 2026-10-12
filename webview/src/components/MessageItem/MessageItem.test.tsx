@@ -1,8 +1,9 @@
-import { render, screen } from '@testing-library/react';
+import { cleanup, render, renderHook, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { ClaudeContentBlock, ClaudeMessage, ToolResultBlock } from '../../types';
 import { extractMarkdownContent } from '../../utils/copyUtils';
 import { MessageItem } from './MessageItem';
+import { useChatComputations } from '../../hooks/useChatComputations';
 
 vi.mock('../MarkdownBlock', () => ({
   default: ({ content }: { content: string }) => <div data-testid="markdown-block">{content}</div>,
@@ -27,6 +28,8 @@ vi.mock('./ContentBlockRenderer', () => ({
 
 vi.mock('./ProviderNotConfiguredCard', () => ({
   ProviderNotConfiguredCard: () => <div data-testid="provider-not-configured-card">provider-card</div>,
+}));
+vi.mock('./providerNotConfigured', () => ({
   isProviderNotConfiguredError: () => false,
 }));
 
@@ -68,6 +71,39 @@ const getContentBlocks = (message: ClaudeMessage): ClaudeContentBlock[] => {
 
 const findToolResult = (_toolId: string | undefined, _messageIndex: number): ToolResultBlock | null => null;
 
+it('does not render a memoized historical item during 30 tail text updates', () => {
+  const message: ClaudeMessage = { type: 'error', content: 'historical error' };
+  const sessionRef = { current: 'performance-session' };
+  const histories = {};
+  const { result, rerender: updateComputations, unmount: unmountComputations } = renderHook(
+    ({ messages }) => useChatComputations({
+      t, messages, mergedMessages: messages, subagentHistories: histories,
+      customSessionTitle: null, restoredSessionTitle: null, streamingActive: true,
+      currentProvider: 'claude', currentSessionId: sessionRef.current, currentSessionIdRef: sessionRef,
+      getMessageText, getContentBlocks,
+    }),
+    { initialProps: { messages: [message] } },
+  );
+  const readMessageText = vi.fn(getMessageText);
+  const view = () => <MessageItem
+    message={message} messageIndex={0} messageKey="historical"
+    isLast={false} streamingActive isThinking={false} t={t}
+    getMessageText={readMessageText} getContentBlocks={getContentBlocks}
+    findToolResult={result.current.findToolResult} extractMarkdownContent={extractMarkdownContent}
+  />;
+  const { rerender, unmount } = render(view());
+  const initialCalls = readMessageText.mock.calls.length;
+  expect(initialCalls).toBeGreaterThan(0);
+  for (let index = 0; index < 30; index += 1) {
+    updateComputations({ messages: [message, { type: 'assistant', content: 'x'.repeat(index + 1) }] });
+    rerender(view());
+  }
+  expect(readMessageText).toHaveBeenCalledTimes(initialCalls);
+  unmount();
+  unmountComputations();
+  cleanup();
+});
+
 function renderMessageItem(message: ClaudeMessage, options: { detailedOutputEnabled?: boolean } = {}) {
   return render(
     <MessageItem
@@ -86,6 +122,37 @@ function renderMessageItem(message: ClaudeMessage, options: { detailedOutputEnab
     />
   );
 }
+
+describe('MessageItem user image layout', () => {
+  it('marks image-only user messages for compact bubble layout', () => {
+    const message: ClaudeMessage = {
+      type: 'user',
+      raw: {
+        content: [{ type: 'image', src: 'data:image/png;base64,test' }],
+      } as any,
+    };
+
+    const { container } = renderMessageItem(message);
+
+    expect(container.querySelector('.message-content')?.classList.contains('image-only')).toBe(true);
+  });
+
+  it('keeps the normal bubble layout when a user image has visible text', () => {
+    const message: ClaudeMessage = {
+      type: 'user',
+      raw: {
+        content: [
+          { type: 'image', src: 'data:image/png;base64,test' },
+          { type: 'text', text: '你好' },
+        ],
+      } as any,
+    };
+
+    const { container } = renderMessageItem(message);
+
+    expect(container.querySelector('.message-content')?.classList.contains('image-only')).toBe(false);
+  });
+});
 
 describe('MessageItem copy button visibility', () => {
   it('hides the assistant copy button for tool-only messages', () => {

@@ -11,6 +11,7 @@ import java.util.List;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotSame;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
 /**
@@ -21,14 +22,147 @@ import static org.junit.Assert.assertTrue;
  * catch regressions in the actual onStreamStart/onStreamEnd lifecycle: the
  * {@code streamActive} transition and per-turn repetition. The deferred-reload
  * drain no longer hangs off this lifecycle — it is owned by the adapter's
- * stream-end callback, which fires only after the final snapshot has entered
- * the ordered webview queue.
+ * stream-end callback, which fires only after the final snapshot has been
+ * accepted by the ordered webview queue.
  */
 public class StreamMessageCoalescerStreamEndHookTest {
 
+    @Test
+    public void stableHistoryIsCapturedOnceAcrossThirtyToolResults() throws Exception {
+        StreamMessageCoalescer coalescer = new StreamMessageCoalescer(new CountingTarget());
+        try {
+            List<ClaudeSession.Message> live = messages(200);
+            for (ClaudeSession.Message message : live) {
+                message.raw = new JsonObject();
+                message.raw.addProperty("text", message.content);
+            }
+            coalescer.enqueue(live);
+            List<ClaudeSession.Message> previous = capturedMessages(coalescer);
+            int copies = previous.size();
+            for (int index = 0; index < 30; index++) {
+                JsonObject result = new JsonObject();
+                result.addProperty("type", "tool_result");
+                result.addProperty("tool_use_id", "tool-" + index);
+                result.addProperty("content", "synthetic result");
+                live.add(new ClaudeSession.Message(ClaudeSession.Message.Type.USER, "[tool_result]", result));
+                coalescer.enqueue(live);
+                List<ClaudeSession.Message> next = capturedMessages(coalescer);
+                for (int messageIndex = 0; messageIndex < next.size(); messageIndex++) {
+                    if (messageIndex >= previous.size() || next.get(messageIndex) != previous.get(messageIndex)) {
+                        copies++;
+                    }
+                }
+                previous = next;
+            }
+            assertEquals("200 history captures + 30 newly added results, not 6665 captures", 230, copies);
+        } finally {
+            coalescer.dispose();
+        }
+    }
+
+    @Test
+    public void cachedSnapshotsInvalidateNestedChangesAndReset() throws Exception {
+        StreamMessageCoalescer coalescer = new StreamMessageCoalescer(new CountingTarget());
+        try {
+            List<ClaudeSession.Message> live = messages(2);
+            JsonObject block = new JsonObject();
+            block.addProperty("type", "tool_use");
+            JsonObject input = new JsonObject();
+            input.addProperty("command", "before");
+            block.add("input", input);
+            live.get(1).raw = new JsonObject();
+            JsonArray blocks = new JsonArray();
+            blocks.add(block);
+            live.get(1).raw.add("content", blocks);
+            coalescer.enqueue(live);
+            List<ClaudeSession.Message> first = capturedMessages(coalescer);
+            input.addProperty("command", "after");
+            live.get(1).content = "changed";
+            coalescer.enqueue(live);
+            List<ClaudeSession.Message> second = capturedMessages(coalescer);
+            assertSame(first.get(0), second.get(0));
+            assertNotSame(first.get(1), second.get(1));
+            assertEquals("before", first.get(1).raw.getAsJsonArray("content").get(0)
+                    .getAsJsonObject().getAsJsonObject("input").get("command").getAsString());
+            assertEquals("after", second.get(1).raw.getAsJsonArray("content").get(0)
+                    .getAsJsonObject().getAsJsonObject("input").get("command").getAsString());
+            coalescer.resetStreamState();
+            coalescer.enqueue(live);
+            assertNotSame(second.get(0), capturedMessages(coalescer).get(0));
+        } finally {
+            coalescer.dispose();
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<ClaudeSession.Message> capturedMessages(StreamMessageCoalescer coalescer) throws Exception {
+        java.lang.reflect.Field field = StreamMessageCoalescer.class.getDeclaredField("latestSourceMessages");
+        field.setAccessible(true);
+        return (List<ClaudeSession.Message>) field.get(coalescer);
+    }
+
+    @Test
+    public void inPlaceToolMutationInvalidatesStructuralSignature() throws Exception {
+        StreamMessageCoalescer coalescer = new StreamMessageCoalescer(new CountingTarget());
+        try {
+            List<ClaudeSession.Message> live = messages(1);
+            JsonObject block = new JsonObject();
+            block.addProperty("type", "tool_use");
+            block.addProperty("id", "tool");
+            JsonObject input = new JsonObject();
+            input.addProperty("command", "before");
+            block.add("input", input);
+            JsonArray blocks = new JsonArray();
+            blocks.add(block);
+            live.get(0).raw = new JsonObject();
+            live.get(0).raw.add("content", blocks);
+            coalescer.enqueue(live);
+            java.lang.reflect.Field field = StreamMessageCoalescer.class.getDeclaredField("latestStructuralSignature");
+            field.setAccessible(true);
+            Object before = field.get(coalescer);
+            input.addProperty("command", "after");
+            coalescer.enqueue(live);
+            assertFalse("Mutable raw identity is not a version", before.equals(field.get(coalescer)));
+        } finally {
+            coalescer.dispose();
+        }
+    }
+
+    @Test
+    public void textThinkingAndToolChangesInvalidateOnlyTheChangedMessage() throws Exception {
+        StreamMessageCoalescer coalescer = new StreamMessageCoalescer(new CountingTarget());
+        try {
+            List<ClaudeSession.Message> live = messages(2);
+            live.get(1).raw = new JsonObject();
+            coalescer.enqueue(live);
+            for (String field : List.of("text", "thinking", "tool_result")) {
+                List<ClaudeSession.Message> previous = capturedMessages(coalescer);
+                String previousRaw = previous.get(1).raw.toString();
+                live.get(1).raw.addProperty(field, "new value");
+                coalescer.enqueue(live);
+                List<ClaudeSession.Message> current = capturedMessages(coalescer);
+                assertSame(previous.get(0), current.get(0));
+                assertNotSame(previous.get(1), current.get(1));
+                assertEquals(previousRaw, previous.get(1).raw.toString());
+                assertEquals("new value", current.get(1).raw.get(field).getAsString());
+                coalescer.flush(live, null);
+                assertSame(current.get(1), capturedMessages(coalescer).get(1));
+            }
+            List<ClaudeSession.Message> beforeReplay = capturedMessages(coalescer);
+            coalescer.replayLatestSnapshot(StreamMessageCoalescer.copyMessagesForTransport(live));
+            coalescer.enqueue(live);
+            assertNotSame(beforeReplay.get(0), capturedMessages(coalescer).get(0));
+        } finally {
+            coalescer.dispose();
+        }
+        java.lang.reflect.Field field = StreamMessageCoalescer.class.getDeclaredField("transportSnapshotCache");
+        field.setAccessible(true);
+        assertTrue(((java.util.Map<?, ?>) field.get(coalescer)).isEmpty());
+    }
+
     /** Minimal JsCallbackTarget that records nothing; lifecycle only. */
     private static final class CountingTarget implements StreamMessageCoalescer.JsCallbackTarget {
-        @Override public void callJavaScript(String functionName, String... args) {}
+        @Override public boolean callJavaScript(String functionName, String... args) { return true; }
         @Override public boolean isDisposed() { return false; }
         @Override public HandlerContext getHandlerContext() { return null; }
     }
@@ -125,8 +259,70 @@ public class StreamMessageCoalescerStreamEndHookTest {
                 StreamMessageCoalescer.selectMessageTransport(growing, previous);
 
         assertTrue(transport.tailUpdate());
-        assertEquals(386, transport.baseIndex());
-        assertEquals(64, transport.messages().size());
+        // Divergence-based transport ships only the appended suffix, not a fixed tail.
+        assertEquals(400, transport.baseIndex());
+        assertEquals(50, transport.messages().size());
+    }
+
+    @Test
+    public void shortConversationGrowthAlsoUsesTail() {
+        // The reported freeze: ~50 messages with a huge transcript re-pushed in
+        // full every 2s. Incremental delivery must not be gated on length.
+        List<ClaudeSession.Message> previous = messages(50);
+        List<ClaudeSession.Message> growing = new ArrayList<>(previous);
+        growing.add(new ClaudeSession.Message(ClaudeSession.Message.Type.USER, "message-50"));
+        growing.add(new ClaudeSession.Message(ClaudeSession.Message.Type.ASSISTANT, "message-51"));
+
+        StreamMessageCoalescer.MessageTransport transport =
+                StreamMessageCoalescer.selectMessageTransport(growing, previous);
+
+        assertTrue(transport.tailUpdate());
+        assertEquals(50, transport.baseIndex());
+        assertEquals(2, transport.messages().size());
+    }
+
+    @Test
+    public void contentChangeInLastMessageTailsOnlyThatMessage() {
+        // Streaming appends text to the last message; only it should ship.
+        List<ClaudeSession.Message> previous = messages(50);
+        List<ClaudeSession.Message> streaming = new ArrayList<>(previous);
+        ClaudeSession.Message last = previous.get(49);
+        ClaudeSession.Message longer = new ClaudeSession.Message(last.type, last.content + "…delta");
+        longer.timestamp = last.timestamp;
+        streaming.set(49, longer);
+
+        StreamMessageCoalescer.MessageTransport transport =
+                StreamMessageCoalescer.selectMessageTransport(streaming, previous);
+
+        assertTrue(transport.tailUpdate());
+        assertEquals(49, transport.baseIndex());
+        assertEquals(1, transport.messages().size());
+        assertEquals(last.content + "…delta", transport.messages().get(0).content);
+    }
+
+    @Test
+    public void identicalSnapshotsFallBackToFull() {
+        List<ClaudeSession.Message> previous = messages(20);
+
+        StreamMessageCoalescer.MessageTransport transport =
+                StreamMessageCoalescer.selectMessageTransport(previous, previous);
+
+        assertFalse(transport.tailUpdate());
+        assertEquals(0, transport.baseIndex());
+    }
+
+    @Test
+    public void divergenceAtFirstMessageForcesAFullRebase() {
+        List<ClaudeSession.Message> previous = messages(20);
+        List<ClaudeSession.Message> rebuilt = new ArrayList<>(previous);
+        rebuilt.set(0, new ClaudeSession.Message(ClaudeSession.Message.Type.SYSTEM, "rewritten"));
+
+        StreamMessageCoalescer.MessageTransport transport =
+                StreamMessageCoalescer.selectMessageTransport(rebuilt, previous);
+
+        assertFalse(transport.tailUpdate());
+        assertEquals(0, transport.baseIndex());
+        assertEquals(rebuilt, transport.messages());
     }
 
     @Test
@@ -143,7 +339,9 @@ public class StreamMessageCoalescerStreamEndHookTest {
     }
 
     @Test
-    public void replacedPrefixForcesAFullRebase() {
+    public void replacedMiddleMessageTailsFromTheDivergence() {
+        // An edited/compacted middle message widens the suffix but does not
+        // force a full re-push: everything from the divergence point ships.
         List<ClaudeSession.Message> previous = messages(400);
         List<ClaudeSession.Message> rebuilt = new ArrayList<>(previous);
         rebuilt.set(10, new ClaudeSession.Message(ClaudeSession.Message.Type.SYSTEM, "summary"));
@@ -151,9 +349,10 @@ public class StreamMessageCoalescerStreamEndHookTest {
         StreamMessageCoalescer.MessageTransport transport =
                 StreamMessageCoalescer.selectMessageTransport(rebuilt, previous);
 
-        assertFalse(transport.tailUpdate());
-        assertEquals(0, transport.baseIndex());
-        assertEquals(rebuilt, transport.messages());
+        assertTrue(transport.tailUpdate());
+        assertEquals(10, transport.baseIndex());
+        assertEquals(390, transport.messages().size());
+        assertEquals("summary", transport.messages().get(0).content);
     }
 
     @Test
@@ -184,6 +383,113 @@ public class StreamMessageCoalescerStreamEndHookTest {
                 .getAsJsonArray("content")
                 .get(0).getAsJsonObject()
                 .get("input").getAsString());
+    }
+
+    @Test
+    public void sessionStateSnapshotDoesNotShareMutableRawTrees() {
+        SessionState state = new SessionState();
+        JsonObject block = new JsonObject();
+        block.addProperty("type", "tool_use");
+        block.addProperty("id", "tool-1");
+        JsonArray content = new JsonArray();
+        content.add(block);
+        JsonObject message = new JsonObject();
+        message.add("content", content);
+        JsonObject raw = new JsonObject();
+        raw.add("message", message);
+        state.addMessage(new ClaudeSession.Message(ClaudeSession.Message.Type.ASSISTANT, "", raw));
+
+        List<ClaudeSession.Message> snapshot = state.getMessagesSnapshot();
+        block.addProperty("id", "tool-2");
+        content.add(new JsonObject());
+
+        JsonArray snapshotContent = snapshot.get(0).raw
+                .getAsJsonObject("message")
+                .getAsJsonArray("content");
+        assertEquals(1, snapshotContent.size());
+        assertEquals("tool-1", snapshotContent.get(0).getAsJsonObject().get("id").getAsString());
+    }
+
+    @Test
+    public void resetDeliveryBaselineStillRunsAPendingAfterFlushCallback() {
+        // The stream-end signal rides flush()'s afterFlush callback. A page reload
+        // during streaming drops the queued snapshot, but it must NOT drop that
+        // callback: without it the frontend waits out the adapter's multi-second
+        // fallback before it learns the turn ended.
+        List<String> callbacks = new ArrayList<>();
+        StreamMessageCoalescer coalescer = new StreamMessageCoalescer(new CountingTarget());
+        try {
+            coalescer.onStreamStart();
+            coalescer.flush((List<ClaudeSession.Message>) null, sequence -> callbacks.add("after-flush:" + sequence));
+
+            coalescer.resetDeliveryBaseline();
+
+            assertEquals(1, callbacks.size());
+            assertTrue(callbacks.get(0).startsWith("after-flush:"));
+        } finally {
+            coalescer.dispose();
+        }
+    }
+
+    @Test
+    public void parkedSnapshotStateDoesNotReportBuildPending() {
+        StreamMessageCoalescer coalescer = new StreamMessageCoalescer(new CountingTarget());
+        try {
+            coalescer.flush(messages(4), null);
+            awaitSnapshotBuildIdle(coalescer);
+            assertFalse("serialization has finished", coalescer.isSnapshotBuildPending());
+
+            // The live state is retained so the next ready page can replay it, but
+            // nothing is being serialized. isSnapshotBuildPending must stay false: the
+            // deferred-reload pollers re-arm on it, so reporting retained state as work
+            // in flight would spin them on a condition they cannot resolve.
+            coalescer.resetDeliveryBaseline();
+
+            assertFalse("a parked snapshot is not serialization work",
+                    coalescer.isSnapshotBuildPending());
+        } finally {
+            coalescer.dispose();
+        }
+    }
+
+    @Test
+    public void usagePushFailureAfterAcceptStillRunsTheAfterFlush() {
+        // The snapshot was accepted by the queue; a failure in the trailing usage
+        // push (foreign HandlerContext code, e.g. mid-teardown) must not park the
+        // delivered snapshot's afterFlush — that callback carries the stream-end
+        // signal, and parking it would stall the frontend until the fallback alarm.
+        List<String> callbacks = new ArrayList<>();
+        StreamMessageCoalescer coalescer = new StreamMessageCoalescer(
+                new StreamMessageCoalescer.JsCallbackTarget() {
+                    @Override public boolean callJavaScript(String functionName, String... args) {
+                        return true;
+                    }
+                    @Override public boolean isDisposed() { return false; }
+                    @Override public HandlerContext getHandlerContext() {
+                        throw new IllegalStateException("handler context torn down");
+                    }
+                });
+        try {
+            coalescer.flush(messages(2), sequence -> callbacks.add("after-flush:" + sequence));
+            awaitSnapshotBuildIdle(coalescer);
+
+            assertEquals("afterFlush runs exactly once for the delivered snapshot",
+                    1, callbacks.size());
+        } finally {
+            coalescer.dispose();
+        }
+    }
+
+    private static void awaitSnapshotBuildIdle(StreamMessageCoalescer coalescer) {
+        long deadline = System.currentTimeMillis() + 5_000L;
+        while (coalescer.isSnapshotBuildPending() && System.currentTimeMillis() < deadline) {
+            try {
+                Thread.sleep(5L);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
     }
 
     private static List<ClaudeSession.Message> messages(int count) {

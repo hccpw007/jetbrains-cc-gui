@@ -10,11 +10,10 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.util.Alarm;
 
 import java.util.ArrayList;
-import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.WeakHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
@@ -31,10 +30,7 @@ public class StreamMessageCoalescer {
     private static final long SLOW_PAYLOAD_BUILD_MS = 25L;
     private static final int LARGE_PAYLOAD_THRESHOLD = 100_000;
     private static final int MEDIUM_INTERVAL_MS = 500;
-    private static final int LARGE_INTERVAL_MS = 2_000;
     private static final int XLARGE_INTERVAL_MS = 5_000;
-    private static final int LONG_CONVERSATION_THRESHOLD = 300;
-    private static final int LONG_CONVERSATION_TAIL_SIZE = 64;
     private static final int STREAMING_MIN_INTERVAL_MS = 150;
     private static final int HEARTBEAT_INTERVAL_MS = 10_000;
 
@@ -51,32 +47,49 @@ public class StreamMessageCoalescer {
     private volatile int lastPayloadChars;
     private volatile long lastPushedSequence;
     private boolean snapshotPending;
+    /** The latest live list, used only while the caller still owns its state lock. */
+    private List<ClaudeSession.Message> latestLiveMessages;
+    /** An immutable-in-practice copy captured before asynchronous serialization. */
     private List<ClaudeSession.Message> latestSourceMessages;
     private List<ClaudeSession.Message> lastSnapshot;
     private List<ClaudeSession.Message> lastDeliveredSnapshot;
     private String latestStructuralSignature;
+    // Gson keys use deep equality and mutable hashes. Cache by raw identity and
+    // retain only the current list so old stream fragments cannot accumulate.
+    private Map<JsonObject, String> structuralSignatureCache = new IdentityHashMap<>();
+    private Map<ClaudeSession.Message, ClaudeSession.Message> transportSnapshotCache = new IdentityHashMap<>();
     private boolean snapshotBuildRunning;
     private List<ClaudeSession.Message> requestedSnapshot;
     private long requestedSequence;
     private long requestedDeliveryEpoch;
+    private boolean requestedForceFull;
     private long deliveryEpoch;
     private LongConsumer requestedAfterFlush;
-    // A message's structural signature depends only on its raw tree, and the
-    // streaming handler reassigns `raw` instead of mutating content blocks in
-    // place (the in-place stamps — turnUsage / uuid / usage — are not part of
-    // the signature). An unchanged raw reference therefore yields the same
-    // signature, so cache by raw identity and recompute only for messages whose
-    // raw changed — typically just the actively-streaming one. Weak keys let
-    // entries for replaced raws and transport copies be garbage-collected.
-    private final Map<JsonObject, String> structuralSignatureCache =
-            Collections.synchronizedMap(new WeakHashMap<>());
 
     /**
      * Callback interface to push data to the webview.
      */
     public interface JsCallbackTarget {
-        void callJavaScript(String functionName, String... args);
+        /**
+         * Enqueue a webview call and report whether the queue accepted it.
+         *
+         * @param functionName JavaScript function name
+         * @param args escaped JavaScript arguments
+         * @return {@code true} when the call was retained for delivery
+         */
+        boolean callJavaScript(String functionName, String... args);
+
         boolean isDisposed();
+
+        /**
+         * Report whether the destination can accept a queued call at this moment.
+         *
+         * @return {@code true} when the destination is available
+         */
+        default boolean isAvailable() {
+            return !isDisposed();
+        }
+
         HandlerContext getHandlerContext();
     }
 
@@ -99,6 +112,11 @@ public class StreamMessageCoalescer {
 
     /**
      * Enqueue the newest message state for coalesced delivery.
+     *
+     * <p>Structural snapshots are copied synchronously while the provider handler
+     * still owns the session-state lock. Only that stable copy is handed to the
+     * asynchronous serializer; text-only streaming updates keep a live reference
+     * until the final flush so they do not deep-copy a large transcript per delta.</p>
      */
     public void enqueue(List<ClaudeSession.Message> messages) {
         if (disposed || callbackTarget.isDisposed() || messages == null) {
@@ -106,7 +124,12 @@ public class StreamMessageCoalescer {
         }
         // Delta-capable providers keep text flowing through the lightweight channel;
         // snapshots remain for structure and final reconciliation.
-        String structuralSignature = getStructuralSignature(messages);
+        //
+        // Both the signature walk and the capture below run under the caller's message
+        // lock, and copyMessagesForTransport already tolerates a null raw, so a failure
+        // in either is a genuine bug rather than a race to retry around. Neither is
+        // swallowed: a silently dropped snapshot leaves the UI stale with no signal at
+        // all, which is strictly harder to diagnose than a thrown exception.
         // Read outside the lock: this calls into HandlerContext, and a stale
         // read only schedules (or skips) one push that the stream-end flush
         // reconciles. Keep foreign calls out of the critical section.
@@ -117,12 +140,17 @@ public class StreamMessageCoalescer {
             if (disposed) {
                 return;
             }
-            latestSourceMessages = List.copyOf(messages);
+            String structuralSignature = getStructuralSignature(messages);
+            latestLiveMessages = List.copyOf(messages);
             boolean structuralChanged = !Objects.equals(latestStructuralSignature, structuralSignature);
             latestStructuralSignature = structuralSignature;
             active = streamActive;
             snapshotPending = snapshotPending || !active || !deltaChannelAvailable || structuralChanged;
             shouldSchedule = !active || !deltaChannelAvailable || structuralChanged;
+            if (shouldSchedule) {
+                // This copy is deliberately made before the provider can mutate raw again.
+                latestSourceMessages = captureReusableMessages(messages);
+            }
         }
         if (active) {
             startHeartbeat();
@@ -145,8 +173,8 @@ public class StreamMessageCoalescer {
 
     /**
      * Notify that a stream has ended. Only clears the streaming state here; the
-     * deferred-reload drain must wait until the final snapshot has entered the
-     * webview queue, which the adapter guarantees via its stream-end callback.
+     * deferred-reload drain must wait until the final snapshot has been accepted by
+     * the webview queue, which the adapter guarantees via its stream-end callback.
      */
     public void onStreamEnd() {
         heartbeatAlarm.cancelAllRequests();
@@ -158,18 +186,75 @@ public class StreamMessageCoalescer {
 
     /**
      * Forget the previous webview delivery baseline without discarding session state.
+     *
+     * <p>The retained live/source state is marked pending so the next ready page can
+     * receive a full snapshot instead of attempting to apply a tail against an empty
+     * frontend transcript.</p>
+     *
+     * <p>A queued snapshot is dropped — the caller is about to replay a fresh one —
+     * but its {@code afterFlush} is not. That callback carries the stream-end signal,
+     * and dropping it would strand the frontend in the responding state until the
+     * adapter's fallback alarm fires. Running it here is safe: the signal is
+     * generation-guarded on the adapter side, and the frontend treats a stream end
+     * with no active stream as the finalize-only case.</p>
      */
     public void resetDeliveryBaseline() {
+        final LongConsumer orphanedCallback;
+        final long orphanedSequence;
         synchronized (lock) {
             deliveryEpoch++;
             lastSnapshot = null;
             lastDeliveredSnapshot = null;
             lastPayloadChars = 0;
+            latestStructuralSignature = null;
+            requestedSnapshot = null;
+            orphanedCallback = requestedAfterFlush;
+            orphanedSequence = requestedSequence;
+            requestedAfterFlush = null;
+            requestedForceFull = false;
+            snapshotPending = latestSourceMessages != null || latestLiveMessages != null;
         }
+        // Outside the lock: the callback reaches into the adapter and the webview queue.
+        runAfterFlush(orphanedCallback, orphanedSequence);
+    }
+
+    /**
+     * Replay a complete snapshot to a newly ready webview page.
+     *
+     * <p>The list is used as-is, so callers must pass a stable copy such as
+     * {@code session.getMessagesSnapshot()} — replaying never re-copies, which keeps
+     * tab-activation replays off the EDT's critical path.</p>
+     *
+     * @param messages stable message snapshot for the current session
+     */
+    public void replayLatestSnapshot(List<ClaudeSession.Message> messages) {
+        if (disposed || callbackTarget.isDisposed() || messages == null) {
+            return;
+        }
+        final long sequence;
+        synchronized (lock) {
+            if (disposed) {
+                return;
+            }
+            transportSnapshotCache.clear();
+            structuralSignatureCache.clear();
+            latestLiveMessages = messages;
+            latestSourceMessages = messages;
+            latestStructuralSignature = null;
+            snapshotPending = true;
+            sequence = ++updateSequence;
+        }
+        requestSnapshotBuild(messages, sequence, null, true);
     }
 
     /**
      * Return whether a snapshot is queued or currently being serialized.
+     *
+     * <p>Deliberately reports only serialization work, not "state is outstanding":
+     * callers use this to decide whether the final snapshot has reached the webview
+     * queue yet. A snapshot parked because its destination vanished is recovered by
+     * the page-ready replay or the next enqueue, so reporting it here would only make
+     * the deferred-reload pollers spin on a condition they cannot resolve.</p>
      *
      * @return true when serialization work remains
      */
@@ -192,11 +277,15 @@ public class StreamMessageCoalescer {
             updateScheduled = false;
             snapshotPending = false;
             latestSourceMessages = null;
+            latestLiveMessages = null;
             lastSnapshot = null;
             lastDeliveredSnapshot = null;
             latestStructuralSignature = null;
             requestedSnapshot = null;
+            transportSnapshotCache.clear();
+            structuralSignatureCache.clear();
             requestedAfterFlush = null;
+            requestedForceFull = false;
             lastUpdateAtMs = 0L;
             lastPayloadChars = 0;
             lastPushedSequence = ++updateSequence;
@@ -217,34 +306,87 @@ public class StreamMessageCoalescer {
     /**
      * Flush the latest messages immediately and optionally run a callback afterwards.
      *
-     * @param afterFlush callback invoked after the snapshot has entered the webview queue
+     * @param afterFlush callback invoked after the full snapshot has been accepted by the webview queue
      */
     public void flush(LongConsumer afterFlush) {
-        if (disposed || callbackTarget.isDisposed()) {
+        flush(null, afterFlush);
+    }
+
+    /**
+     * Flush an explicitly supplied message list as a full snapshot.
+     *
+     * <p>Three sources feed the snapshot, each copied differently because only one
+     * of them can still be mutated:</p>
+     * <ul>
+     *   <li><b>{@code messages} supplied by the caller</b> — a live list. The caller
+     *       must hold {@code SessionState}'s message lock for the duration of this
+     *       call, exactly as {@link #enqueue(List)} requires, because the deep copy
+     *       below runs against it. {@link #copyMessagesForTransport(List)} treats a
+     *       concurrent mutation as a bug rather than a race to retry around.</li>
+     *   <li><b>{@code latestSourceMessages}</b> — already an independent deep copy
+     *       captured under that lock by {@link #enqueue(List)} or
+     *       {@link #replayLatestSnapshot(List)}. Reused as-is: copying it again
+     *       would double the cost of every final flush on a long transcript. This is
+     *       the newest structure the provider announced, so it is also the raw tree
+     *       the frontend should reconcile against.</li>
+     *   <li><b>{@code latestLiveMessages}</b> — a shallow list copy that still
+     *       references live raws. Copied here, and the caller must hold the lock.</li>
+     * </ul>
+     * <p>When none of the three exists the previous snapshot is replayed, so a flush
+     * with no state behind it is a no-op rather than a clear.</p>
+     *
+     * @param messages latest message list captured under the caller's state lock, or {@code null}
+     * @param afterFlush callback invoked after the snapshot has been accepted
+     */
+    public void flush(List<ClaudeSession.Message> messages, LongConsumer afterFlush) {
+        if (disposed) {
+            runAfterFlush(afterFlush, -1L);
             return;
         }
 
         final List<ClaudeSession.Message> sourceMessages;
+        final boolean sourceIsTransportCopy;
+        final List<ClaudeSession.Message> previousSnapshot;
         final List<ClaudeSession.Message> snapshot;
         final long sequence;
         synchronized (lock) {
             updateAlarm.cancelAllRequests();
             updateScheduled = false;
             snapshotPending = false;
-            sourceMessages = latestSourceMessages;
+            if (messages != null) {
+                sourceMessages = List.copyOf(messages);
+                sourceIsTransportCopy = false;
+            } else if (latestSourceMessages != null) {
+                // enqueue/replayLatestSnapshot already captured this list as an
+                // independent deep copy under the state lock; copying it again would
+                // double the cost of every final flush on a long transcript.
+                sourceMessages = latestSourceMessages;
+                sourceIsTransportCopy = true;
+            } else {
+                sourceMessages = latestLiveMessages;
+                sourceIsTransportCopy = false;
+            }
+            previousSnapshot = lastSnapshot;
             sequence = ++updateSequence;
+            if (sourceMessages == null) {
+                snapshot = previousSnapshot;
+            } else if (sourceIsTransportCopy) {
+                snapshot = sourceMessages;
+            } else {
+                snapshot = captureReusableMessages(sourceMessages);
+            }
+            if (snapshot != null) {
+                latestSourceMessages = snapshot;
+                snapshotPending = true;
+            }
         }
-        snapshot = sourceMessages != null
-                ? copyMessagesForTransport(sourceMessages) : lastSnapshot;
 
         if (snapshot == null) {
-            if (afterFlush != null) {
-                afterFlush.accept(sequence);
-            }
+            runAfterFlush(afterFlush, sequence);
             return;
         }
 
-        requestSnapshotBuild(snapshot, sequence, afterFlush);
+        requestSnapshotBuild(snapshot, sequence, afterFlush, true);
     }
 
     /**
@@ -252,6 +394,7 @@ public class StreamMessageCoalescer {
      */
     public void dispose() {
         disposed = true;
+        resetStreamState();
         try {
             updateAlarm.cancelAllRequests();
             updateAlarm.dispose();
@@ -273,10 +416,13 @@ public class StreamMessageCoalescer {
         }
         int chars = lastPayloadChars;
         int interval;
-        if (chars > 500_000) {
+        // Payloads above 200k chars used to ship every 2s and were observed to
+        // stall the JCEF renderer long enough for the watchdog to reload the
+        // page. With divergence-based tail transport these huge full snapshots
+        // are rare (initial load, rebase), so coalesce them hard when they do
+        // occur — the streaming delta channel keeps text flowing meanwhile.
+        if (chars > 200_000) {
             interval = XLARGE_INTERVAL_MS;
-        } else if (chars > 200_000) {
-            interval = LARGE_INTERVAL_MS;
         } else if (chars > LARGE_PAYLOAD_THRESHOLD) {
             interval = MEDIUM_INTERVAL_MS;
         } else {
@@ -316,13 +462,13 @@ public class StreamMessageCoalescer {
                 sourceMessages = latestSourceMessages;
                 sequence = updateSequence;
             }
-            snapshot = sourceMessages == null ? null : copyMessagesForTransport(sourceMessages);
+            snapshot = sourceMessages;
 
             if (disposed || callbackTarget.isDisposed()) {
                 return;
             }
             if (snapshot != null) {
-                requestSnapshotBuild(snapshot, sequence, null);
+                requestSnapshotBuild(snapshot, sequence, null, false);
             }
 
             boolean hasPending;
@@ -338,7 +484,8 @@ public class StreamMessageCoalescer {
     private void requestSnapshotBuild(
             List<ClaudeSession.Message> messages,
             long sequence,
-            LongConsumer afterFlush
+            LongConsumer afterFlush,
+            boolean forceFull
     ) {
         boolean startWorker = false;
         synchronized (lock) {
@@ -348,17 +495,8 @@ public class StreamMessageCoalescer {
             requestedSnapshot = messages;
             requestedSequence = sequence;
             requestedDeliveryEpoch = deliveryEpoch;
-            if (afterFlush != null) {
-                if (requestedAfterFlush == null) {
-                    requestedAfterFlush = afterFlush;
-                } else {
-                    LongConsumer previous = requestedAfterFlush;
-                    requestedAfterFlush = completedSequence -> {
-                        previous.accept(completedSequence);
-                        afterFlush.accept(completedSequence);
-                    };
-                }
-            }
+            requestedForceFull = requestedForceFull || forceFull;
+            requestedAfterFlush = chainCallbacks(requestedAfterFlush, afterFlush);
             if (!snapshotBuildRunning) {
                 snapshotBuildRunning = true;
                 startWorker = true;
@@ -374,6 +512,7 @@ public class StreamMessageCoalescer {
                     requestedSnapshot = null;
                     orphanedCallback = requestedAfterFlush;
                     requestedAfterFlush = null;
+                    requestedForceFull = false;
                 }
                 LOG.warn("Failed to schedule message snapshot serialization: " + e.getMessage(), e);
                 // Run the chained callbacks (which include afterFlush) so a
@@ -387,6 +526,7 @@ public class StreamMessageCoalescer {
         final List<ClaudeSession.Message> messages;
         final long sequence;
         final LongConsumer afterFlush;
+        final boolean forceFull;
         final List<ClaudeSession.Message> deliveredSnapshot;
         final long snapshotDeliveryEpoch;
         synchronized (lock) {
@@ -397,16 +537,21 @@ public class StreamMessageCoalescer {
             messages = requestedSnapshot;
             sequence = requestedSequence;
             afterFlush = requestedAfterFlush;
+            forceFull = requestedForceFull;
             deliveredSnapshot = lastDeliveredSnapshot;
             snapshotDeliveryEpoch = requestedDeliveryEpoch;
             requestedSnapshot = null;
             requestedAfterFlush = null;
+            requestedForceFull = false;
             lastSnapshot = messages;
         }
 
         boolean sent = false;
+        boolean stale = false;
         try {
-            MessageTransport transport = selectMessageTransport(messages, deliveredSnapshot);
+            MessageTransport transport = forceFull
+                    ? new MessageTransport(messages, 0, false)
+                    : selectMessageTransport(messages, deliveredSnapshot);
             long buildStartedAt = System.nanoTime();
             String messagesJson = MessageJsonConverter.convertMessagesToJson(transport.messages());
             int payloadChars = messagesJson.length();
@@ -423,49 +568,97 @@ public class StreamMessageCoalescer {
                         + ", transportedMessages=" + transport.messages().size()
                         + ", tailBaseIndex=" + transport.baseIndex()
                         + ", buildMs=" + payloadBuildMs
-                        + ", sequence=" + sequence);
+                        + ", sequence=" + sequence
+                        + ", forceFull=" + forceFull);
             } else if (LOG.isDebugEnabled()) {
                 LOG.debug("[WebviewTransport] updateMessages payload chars=" + payloadChars
                         + ", messages=" + messages.size()
                         + ", buildMs=" + payloadBuildMs
-                        + ", sequence=" + sequence);
+                        + ", sequence=" + sequence
+                        + ", forceFull=" + forceFull);
             }
 
             final long pushSequence;
             synchronized (lock) {
                 if (snapshotDeliveryEpoch != deliveryEpoch || sequence < lastPushedSequence) {
                     pushSequence = -1L;
+                    stale = true;
                 } else {
                     pushSequence = sequence;
-                    lastPushedSequence = sequence;
                 }
             }
             if (pushSequence >= 0L && !disposed && !callbackTarget.isDisposed()) {
-                if (transport.tailUpdate()) {
-                    callbackTarget.callJavaScript(
-                            "updateMessageTail",
-                            escapedMessagesJson,
-                            String.valueOf(transport.baseIndex()),
-                            String.valueOf(pushSequence));
+                boolean accepted = callbackTarget.isAvailable();
+                if (accepted) {
+                    if (transport.tailUpdate()) {
+                        accepted = callbackTarget.callJavaScript(
+                                "updateMessageTail",
+                                escapedMessagesJson,
+                                String.valueOf(transport.baseIndex()),
+                                String.valueOf(pushSequence));
+                    } else {
+                        accepted = callbackTarget.callJavaScript(
+                                "updateMessages", escapedMessagesJson, String.valueOf(pushSequence));
+                    }
+                }
+                if (accepted) {
+                    synchronized (lock) {
+                        if (snapshotDeliveryEpoch == deliveryEpoch && sequence >= lastPushedSequence) {
+                            lastPushedSequence = sequence;
+                            lastDeliveredSnapshot = messages;
+                            if (latestSourceMessages == messages && requestedSnapshot == null) {
+                                snapshotPending = false;
+                            }
+                        }
+                    }
+                    // The snapshot is delivered from here on. Mark it sent BEFORE the
+                    // usage push: a failure in that foreign HandlerContext code must
+                    // not drop this frame into the catch below, which would park an
+                    // already-delivered snapshot's afterFlush (the stream-end signal)
+                    // and force a needless full re-serialization.
+                    sent = true;
+                    String usageJson = MessageJsonConverter.buildUsageUpdateJson(
+                            messages, callbackTarget.getHandlerContext());
+                    if (usageJson != null) {
+                        callbackTarget.callJavaScript("onUsageUpdate", JsUtils.escapeJs(usageJson));
+                    }
                 } else {
-                    callbackTarget.callJavaScript(
-                            "updateMessages", escapedMessagesJson, String.valueOf(pushSequence));
+                    // The destination is unavailable (page not ready) or the bounded
+                    // queue rejected the call. Retrying here would re-serialize the
+                    // whole transcript against a destination already known to be
+                    // closed; the queue retains its own pending events and re-drains
+                    // on the frontend-ready transition, and a page replay re-requests
+                    // a full snapshot. Park the state instead.
+                    markSnapshotUndelivered(afterFlush, snapshotDeliveryEpoch);
                 }
-                synchronized (lock) {
-                    lastDeliveredSnapshot = messages;
-                }
-                String usageJson = MessageJsonConverter.buildUsageUpdateJson(
-                        messages, callbackTarget.getHandlerContext());
-                if (usageJson != null) {
-                    callbackTarget.callJavaScript("onUsageUpdate", JsUtils.escapeJs(usageJson));
-                }
-                sent = true;
+            } else if (!stale) {
+                // Reachable only when the push was skipped because the target is
+                // gone: pushSequence >= 0 and stale == false leave `disposed ||
+                // callbackTarget.isDisposed()` as the only false condition above.
+                // Both are monotonic, so this is genuinely a dead destination
+                // rather than a race — run the callback, but do not park the
+                // snapshot for a page that no longer exists.
+                stale = true;
             }
         } catch (Exception | LinkageError e) {
             LOG.warn("Failed to serialize or push message snapshot: " + e.getMessage(), e);
+            // The failure may have happened before the push decision above, so this
+            // re-derives staleness rather than reusing `stale`. A live destination
+            // parks the snapshot for retry; a dead one only runs the callback.
+            // A snapshot already marked sent was delivered — parking it would
+            // chain its afterFlush into the next build and run it twice.
+            boolean abandoned = disposed || callbackTarget.isDisposed()
+                    || !isCurrentDeliveryEpoch(snapshotDeliveryEpoch);
+            if (abandoned) {
+                stale = true;
+            } else if (!sent) {
+                markSnapshotUndelivered(afterFlush, snapshotDeliveryEpoch);
+            }
         }
 
-        runAfterFlush(afterFlush, sequence);
+        if (sent || stale) {
+            runAfterFlush(afterFlush, sequence);
+        }
 
         boolean continueWorker;
         synchronized (lock) {
@@ -486,6 +679,7 @@ public class StreamMessageCoalescer {
                     orphanedCallback = requestedAfterFlush;
                     orphanedSequence = requestedSequence;
                     requestedAfterFlush = null;
+                    requestedForceFull = false;
                 }
                 LOG.warn("Failed to continue message snapshot serialization: " + e.getMessage(), e);
                 runAfterFlush(orphanedCallback, orphanedSequence);
@@ -494,6 +688,52 @@ public class StreamMessageCoalescer {
         if (!sent && afterFlush == null && LOG.isDebugEnabled()) {
             LOG.debug("Message snapshot was not dispatched, sequence=" + sequence);
         }
+    }
+
+    /**
+     * Record that a built snapshot never reached the webview.
+     *
+     * <p>The snapshot is not retried from here. Instead the pending flag is restored
+     * so the replay machinery knows state is outstanding, the next delivery is forced
+     * to be a full baseline (a tail is meaningless to a page that missed its
+     * baseline), and the caller's {@code afterFlush} is parked rather than dropped or
+     * run early — it still has to observe the ordering contract that the stream-end
+     * signal follows the final snapshot.</p>
+     *
+     * @param afterFlush callback riding this snapshot, or {@code null}
+     * @param snapshotDeliveryEpoch delivery epoch the snapshot was built for
+     */
+    private void markSnapshotUndelivered(LongConsumer afterFlush, long snapshotDeliveryEpoch) {
+        synchronized (lock) {
+            if (disposed || snapshotDeliveryEpoch != deliveryEpoch) {
+                return;
+            }
+            snapshotPending = true;
+            requestedForceFull = true;
+            if (afterFlush != null) {
+                requestedAfterFlush = chainCallbacks(requestedAfterFlush, afterFlush);
+            }
+        }
+    }
+
+    /**
+     * Combine two optional callbacks so both run, first-registered first.
+     *
+     * @param existing callback already parked, or {@code null}
+     * @param incoming callback to append, or {@code null}
+     * @return the combined callback, or {@code null} when neither is present
+     */
+    private static LongConsumer chainCallbacks(LongConsumer existing, LongConsumer incoming) {
+        if (existing == null) {
+            return incoming;
+        }
+        if (incoming == null) {
+            return existing;
+        }
+        return completedSequence -> {
+            existing.accept(completedSequence);
+            incoming.accept(completedSequence);
+        };
     }
 
     private boolean isCurrentDeliveryEpoch(long epoch) {
@@ -513,33 +753,54 @@ public class StreamMessageCoalescer {
         }
     }
 
+    /**
+     * Choose what to transport for one snapshot delivery.
+     *
+     * <p>Streaming changes concentrate at the tail of the transcript (new blocks,
+     * new messages, text appended to the last message), so instead of gating
+     * incremental delivery on conversation length this finds the first index
+     * where the new snapshot diverges from the delivered one and ships only the
+     * suffix from that point. A 50-message conversation with a 300k-char
+     * transcript then pushes a few KB per update instead of the full transcript,
+     * which is what kept the JCEF renderer busy enough to trip the webview
+     * watchdog. Any change ahead of the tail — an edited or compacted middle
+     * message — is detected by the same walk and simply widens the suffix; only
+     * a divergence at index 0 (or a shrunk/unknown baseline) falls back to a
+     * full snapshot.</p>
+     *
+     * <p>The prefix walk runs on the snapshot executor thread. {@code String.equals}
+     * bails on length and the identity shortcut covers shared entries, so the
+     * comparison is far cheaper than the serialization it replaces.</p>
+     */
     static MessageTransport selectMessageTransport(List<ClaudeSession.Message> messages,
                                                     List<ClaudeSession.Message> previousMessages) {
-        boolean longConversation = messages.size() > LONG_CONVERSATION_THRESHOLD;
-        int candidateBaseIndex = longConversation
-                ? Math.max(0, messages.size() - LONG_CONVERSATION_TAIL_SIZE) : 0;
-        boolean stablePrefix = previousMessages != null
-                && messages.size() >= previousMessages.size()
-                && hasSamePrefix(previousMessages, messages, candidateBaseIndex);
-        boolean tailUpdate = longConversation && stablePrefix;
-        int baseIndex = tailUpdate ? candidateBaseIndex : 0;
-        List<ClaudeSession.Message> transportMessages = tailUpdate
-                ? List.copyOf(messages.subList(baseIndex, messages.size())) : messages;
-        return new MessageTransport(transportMessages, baseIndex, tailUpdate);
+        if (previousMessages == null || messages.size() < previousMessages.size()) {
+            return new MessageTransport(messages, 0, false);
+        }
+        int divergence = firstDivergenceIndex(previousMessages, messages);
+        if (divergence <= 0 || divergence >= messages.size()) {
+            // No stable prefix to build on, or nothing changed at all.
+            return new MessageTransport(messages, 0, false);
+        }
+        List<ClaudeSession.Message> transportMessages =
+                List.copyOf(messages.subList(divergence, messages.size()));
+        return new MessageTransport(transportMessages, divergence, true);
     }
 
-    private static boolean hasSamePrefix(List<ClaudeSession.Message> previousMessages,
-                                         List<ClaudeSession.Message> messages,
-                                         int prefixLength) {
-        if (previousMessages.size() < prefixLength) {
-            return false;
-        }
+    /**
+     * Return the first index where {@code messages} differs from
+     * {@code previousMessages}, or the shared prefix length when one list is a
+     * strict prefix of the other.
+     */
+    private static int firstDivergenceIndex(List<ClaudeSession.Message> previousMessages,
+                                            List<ClaudeSession.Message> messages) {
+        int prefixLength = Math.min(previousMessages.size(), messages.size());
         for (int i = 0; i < prefixLength; i++) {
             if (!sameStableMessage(previousMessages.get(i), messages.get(i))) {
-                return false;
+                return i;
             }
         }
-        return true;
+        return prefixLength;
     }
 
     private static boolean sameStableMessage(ClaudeSession.Message previous,
@@ -553,6 +814,23 @@ public class StreamMessageCoalescer {
                         computeMessageStructuralSignature(current.raw));
     }
 
+    /**
+     * Deep-copy messages for asynchronous transport.
+     *
+     * <p>Every caller reaches this while holding {@code SessionState}'s message lock —
+     * either directly ({@code enqueue}, {@code flush}, {@code getMessagesSnapshot}) or
+     * by owning the list it passes in ({@code replayLatestSnapshot}). A concurrent
+     * writer therefore cannot interleave, and a failure here is a genuine bug rather
+     * than a race to retry around. Recovery belongs to the callers: they keep the
+     * previous snapshot and let the next event or the stream-end flush rebuild it.</p>
+     *
+     * <p>Which lock is held matters less than that one is: the copy only has to be
+     * ordered against writes to the lists and raw trees it walks. Callers locking a
+     * <em>new</em> session's state while the coalescer still holds state retained
+     * from a <em>previous</em> one are still correct, because a superseded session
+     * has no live writer left — its provider callbacks were deactivated and the
+     * daemon reader stopped with the channel.</p>
+     */
     static List<ClaudeSession.Message> copyMessagesForTransport(List<ClaudeSession.Message> messages) {
         List<ClaudeSession.Message> copies = new ArrayList<>(messages.size());
         for (ClaudeSession.Message message : messages) {
@@ -564,33 +842,59 @@ public class StreamMessageCoalescer {
         return List.copyOf(copies);
     }
 
+    private List<ClaudeSession.Message> captureReusableMessages(List<ClaudeSession.Message> messages) {
+        synchronized (lock) {
+            Map<ClaudeSession.Message, ClaudeSession.Message> currentCache = new IdentityHashMap<>();
+            List<ClaudeSession.Message> copies = new ArrayList<>(messages.size());
+            for (ClaudeSession.Message message : messages) {
+                ClaudeSession.Message copy = transportSnapshotCache.get(message);
+                if (copy == null || copy.type != message.type || copy.timestamp != message.timestamp
+                        || !Objects.equals(copy.content, message.content) || !Objects.equals(copy.raw, message.raw)) {
+                    copy = new ClaudeSession.Message(message.type, message.content);
+                    copy.timestamp = message.timestamp;
+                    copy.raw = message.raw == null ? null : message.raw.deepCopy();
+                }
+                currentCache.put(message, copy);
+                copies.add(copy);
+            }
+            if (!disposed) {
+                transportSnapshotCache = currentCache;
+            }
+            return List.copyOf(copies);
+        }
+    }
+
     private String getStructuralSignature(List<ClaudeSession.Message> messages) {
+        Map<JsonObject, String> currentCache = new IdentityHashMap<>();
         StringBuilder signature = new StringBuilder();
         for (int i = 0; i < messages.size(); i++) {
             ClaudeSession.Message message = messages.get(i);
+            JsonObject raw = message.raw;
+            ClaudeSession.Message cachedMessage = transportSnapshotCache.get(message);
+            JsonObject cachedRaw = cachedMessage != null && Objects.equals(raw, cachedMessage.raw)
+                    ? cachedMessage.raw : null;
+            String blockSignature = raw == null ? "" : structuralSignatureCache.get(cachedRaw);
+            if (blockSignature == null) {
+                blockSignature = computeMessageStructuralSignature(raw);
+            }
+            if (cachedRaw != null) {
+                currentCache.put(cachedRaw, blockSignature);
+            }
             signature.append(i)
                     .append(':')
                     .append(message.type)
                     .append(':')
                     .append(message.timestamp)
                     .append(':')
-                    .append(getCachedMessageStructuralSignature(message))
+                    .append(blockSignature)
                     .append(';');
         }
+        structuralSignatureCache = currentCache;
         return signature.toString();
     }
 
-    private String getCachedMessageStructuralSignature(ClaudeSession.Message message) {
-        JsonObject raw = message.raw;
-        if (raw == null) {
-            return "";
-        }
-        return structuralSignatureCache.computeIfAbsent(
-                raw, StreamMessageCoalescer::computeMessageStructuralSignature);
-    }
-
     private static String computeMessageStructuralSignature(JsonObject raw) {
-        JsonArray blocks = findContentArray(raw);
+        JsonArray blocks = MessageStructure.findContentArray(raw);
         if (blocks == null) {
             return "";
         }
@@ -627,22 +931,6 @@ public class StreamMessageCoalescer {
             signature.append('|');
         }
         return signature.toString();
-    }
-
-    private static JsonArray findContentArray(JsonObject raw) {
-        if (raw == null) {
-            return null;
-        }
-        if (raw.has("content") && raw.get("content").isJsonArray()) {
-            return raw.getAsJsonArray("content");
-        }
-        if (raw.has("message") && raw.get("message").isJsonObject()) {
-            JsonObject message = raw.getAsJsonObject("message");
-            if (message.has("content") && message.get("content").isJsonArray()) {
-                return message.getAsJsonArray("content");
-            }
-        }
-        return null;
     }
 
     private static void appendFieldSignature(StringBuilder signature, JsonObject block, String fieldName) {
@@ -693,7 +981,8 @@ public class StreamMessageCoalescer {
             return false;
         }
         String provider = context.getCurrentProvider();
-        return "claude".equals(provider) || "codex".equals(provider) || "grok".equals(provider);
+        return "claude".equals(provider) || "codex".equals(provider) || "grok".equals(provider)
+                || "zcode".equals(provider);
     }
 
     private void startHeartbeat() {

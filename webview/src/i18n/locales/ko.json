@@ -240,7 +240,9 @@
           "kimi": "Kimi CLI",
           "opencode": "OpenCode",
           "pi": "PI CLI",
-          "omp": "OMP CLI"
+          "omp": "OMP CLI",
+          "minimax": "MiniMax Code",
+          "zcode": "ZCode"
         },
         "currentProviderAuto": "Currently using automatic selection: {{provider}}",
         "currentProviderManual": "Currently using manually selected provider: {{provider}}",
@@ -946,6 +948,14 @@
       "copied": "Copied to clipboard",
       "copyFailed": "Failed to copy",
       "tools": {
+        "minimax": {
+          "name": "MiniMax Code",
+          "description": "MiniMax 터미널 코딩 에이전트. Node.js 22.19+ / 24+ 필요(23 미지원); 명령: minimax / mcode"
+        },
+        "zcode": {
+          "name": "ZCode",
+          "description": "GLM 모델을 사용하는 Zhipu ZCode 데스크톱 코딩 앱"
+        },
         "grok": {
           "name": "Grok CLI",
           "description": "xAI Grok terminal coding agent"
@@ -1195,8 +1205,12 @@
     "quoteSuccess": "인용됨!"
   },
   "contextMenu": {
+    "cut": "잘라내기",
     "copy": "복사",
-    "quote": "인용"
+    "paste": "붙여넣기",
+    "newline": "줄바꿈 삽입",
+    "quote": "인용",
+    "copyLink": "링크 주소 복사"
   },
   "usage": {
     "checkingLabel": "tokentracker-cli 확인 중…",
@@ -1443,7 +1457,32 @@
     "bashGroupAllCompleted": "모두 완료",
     "bashGroupFailed": "실패",
     "updatePlan": "계획 업데이트",
-    "applyPatch": "패치 적용"
+    "applyPatch": "패치 적용",
+    "reportFindings": {
+      "title": "리뷰 지적 사항",
+      "findingsCount_one": "지적 {{count}}건",
+      "findingsCount_other": "지적 {{count}}건",
+      "confirmedCount_one": "확인됨 {{count}}건",
+      "confirmedCount_other": "확인됨 {{count}}건",
+      "plausibleCount_one": "검토 필요 {{count}}건",
+      "plausibleCount_other": "검토 필요 {{count}}건",
+      "confirmed": "확인됨",
+      "plausible": "검토 필요",
+      "fixed": "수정됨",
+      "skipped": "건너뜀",
+      "noChangeNeeded": "수정 불필요",
+      "empty": "지적 사항 없음",
+      "summaryLabel": "리뷰 요약",
+      "summary": "요약",
+      "failureScenario": "발생 시나리오",
+      "reviewLevel": "리뷰 수준: {{level}}",
+      "openFile": "{{filePath}} 열기",
+      "expandFinding": "지적 사항 펼치기",
+      "collapseFinding": "지적 사항 접기",
+      "expandReport": "리뷰 지적 사항 펼치기",
+      "collapseReport": "리뷰 지적 사항 접기",
+      "untitled": "제목 없는 지적"
+    }
   },
   "todo": {
     "inProgress": "진행 중 {{completed}}/{{total}} 작업",
@@ -1643,11 +1682,15 @@
   "models": {
     "addModel": "모델 추가",
     "searchPlaceholder": "모델 검색",
+    "clearSearch": "검색 지우기",
     "noModelsFound": "모델을 찾을 수 없습니다",
+    "noSearchMatches": "\"{{query}}\"와 일치하는 모델이 없습니다",
     "hiddenModelCount": "+ {{count}}개 모델 더 있음. 입력하여 검색하세요.",
     "pinned": "고정",
     "pin": "고정",
     "unpin": "고정 해제",
+    "retiredBadge": "지원 종료",
+    "retiredCustomHint": "API에서 더 이상 제공하지 않는 모델 ID입니다. 사용자 정의 모델로 추가했기 때문에 바꾸지 않고 그대로 전송합니다.",
     "claude": {
       "sonnet46": {
         "label": "Sonnet 4.6",
@@ -1657,9 +1700,17 @@
         "label": "Sonnet 5",
         "description": "Sonnet 5 · 기본 모델 사용"
       },
+      "sonnet55": {
+        "label": "Sonnet 5.5",
+        "description": "Sonnet 5.5 · 최신 Sonnet 업그레이드"
+      },
+      "opus55": {
+        "label": "Opus 5.5",
+        "description": "Opus 5.5 · 최신 Opus 업그레이드"
+      },
       "opus5": {
         "label": "Opus 5",
-        "description": "Opus 5 · 최신 Opus 업그레이드"
+        "description": "Opus 5 · 이전 세대 Opus 모델"
       },
       "opus46_1m": {
         "label": "Opus 4.6",
@@ -1669,13 +1720,13 @@
         "label": "Haiku 4.5",
         "description": "Haiku 4.5 · 빠른 응답에 최적"
       },
-      "opus48": {
-        "label": "Opus 4.8",
-        "description": "Opus 4.8 · 이전 세대 Opus 모델"
+      "fable51": {
+        "label": "Fable 5.1",
+        "description": "Fable 5.1 · 가장 강력함 · Mythos급"
       },
       "fable5": {
         "label": "Fable 5",
-        "description": "Fable 5 · 가장 강력함 · Mythos급"
+        "description": "Fable 5 · 이전 세대 Fable 모델"
       }
     },
     "longContext": {
@@ -1685,6 +1736,18 @@
       "tooltipDisabled": "Haiku에서는 1M 컨텍스트를 사용할 수 없습니다"
     },
     "codex": {
+      "gpt6astra": {
+        "label": "GPT-6 Astra",
+        "description": "자율 컴퓨터 조작과 장기 에이전트 작업을 위한 차세대 플래그십 모델."
+      },
+      "gpt61sol": {
+        "label": "GPT-6.1 Sol",
+        "description": "복잡한 전문 작업을 위한 GPT-6.1 프런티어 모델."
+      },
+      "gpt6sol": {
+        "label": "GPT-6 Sol",
+        "description": "복잡한 전문 작업을 위한 GPT-6 프런티어 모델."
+      },
       "gpt56sol": {
         "label": "GPT-5.6 Sol",
         "description": "복잡한 전문 작업을 위한 프런티어 모델."
@@ -1692,6 +1755,10 @@
       "gpt56terra": {
         "label": "GPT-5.6 Terra",
         "description": "지능과 비용의 균형을 맞춘 GPT-5.6 모델."
+      },
+      "gpt6luna": {
+        "label": "GPT-6 Luna",
+        "description": "비용 민감형 워크로드에 최적화된 GPT-6 모델."
       },
       "gpt56luna": {
         "label": "GPT-5.6 Luna",
@@ -1723,8 +1790,15 @@
       "tooltip": "파일 편집 자동 수락",
       "description": "파일 생성/편집을 자동으로 수락하여 확인 단계를 줄입니다"
     },
+    "auto": {
+      "label": "자동 승인 모드",
+      "shortLabel": "자동 승인",
+      "tooltip": "공급자 기본 검토자가 승인 요청을 자동으로 처리하도록 합니다",
+      "description": "안전 경계를 유지하면서 공급자 기본 검토자를 사용합니다"
+    },
     "bypassPermissions": {
-      "label": "자동 모드",
+      "label": "완전 자동",
+      "shortLabel": "완전 자동",
       "tooltip": "모든 권한 검사 우회",
       "description": "완전 자동화, 모든 권한 검사를 우회합니다 [주의하여 사용]"
     }
@@ -1744,6 +1818,12 @@
       "label": "자동 편집",
       "tooltip": "Codex approval_policy=on-request – 필요 시 승인을 요청합니다",
       "description": "균형 잡힌 옵션. 일반적인 편집 흐름을 허용하면서도 필요 시 승인을 요구합니다."
+    },
+    "auto": {
+      "label": "대신 승인",
+      "shortLabel": "자동 승인",
+      "tooltip": "Codex approvals_reviewer=auto_review – 자동 검토자가 대상 승인 요청을 처리합니다.",
+      "description": "workspace-write 샌드박스를 유지하고 검토자가 승인할 수 없는 요청은 사용자에게 전달합니다."
     },
     "bypassPermissions": {
       "label": "완전 자동",
@@ -1785,6 +1865,12 @@
     },
     "kimi": {
       "label": "Kimi CLI"
+    },
+    "minimax": {
+      "label": "MiniMax Code"
+    },
+    "zcode": {
+      "label": "ZCode"
     },
     "gemini": {
       "label": "Gemini Cli"
@@ -1935,6 +2021,11 @@
     "copied": "복사됨",
     "openDependencySettings": "종속성 관리 열기",
     "recommended": "권장",
+    "codexWriterConflict": {
+      "title": "Codex 스레드 사용 중",
+      "intro": "새 턴이 시작될 때 이전 턴의 Codex 프로세스가 아직 이 스레드에 기록 중이었습니다. 플러그인은 이제 전송 전에 이전 턴을 자동으로 중지합니다.",
+      "reason": "몇 초 후 메시지를 다시 보내세요. 새 세션을 만들 필요가 없습니다."
+    },
     "codexThreadResume": {
       "title": "세션 스레드가 더 이상 유효하지 않습니다",
       "intro": "새 세션을 만들면 이 문제가 해결됩니다. 현재 세션의 스레드 ID가 Codex 서버에 더 이상 존재하지 않습니다.",

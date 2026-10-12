@@ -21,6 +21,7 @@ import {
   initializeAndAuthenticate,
   ensureSession,
   applyPermissionModeToSession,
+  applyReasoningEffortToSession,
   buildPromptBlocks,
   isAutoApproveMode,
   resolveAcpPermissionDecision,
@@ -67,6 +68,9 @@ function usageFromNotification(method, params) {
 
 const runtimes = new Map(); // runtimeKey -> runtime
 let activeTurnRuntime = null;
+const GROK_RUNTIME_MAX_IDLE_MS = 60 * 1000;
+const GROK_RUNTIME_CLEANUP_INTERVAL_MS = 15 * 1000;
+let runtimeCleanupInFlight = false;
 
 function normalizePermissionMode(mode) {
   const m = String(mode || '').trim().toLowerCase();
@@ -118,6 +122,15 @@ function getAllRuntimes() {
   return Array.from(runtimes.values());
 }
 
+/** Lightweight lifecycle snapshot used by the outer daemon idle reaper. */
+export function getRuntimeSnapshot() {
+  const all = getAllRuntimes();
+  return {
+    runtimeCount: all.filter((runtime) => runtime && !runtime.closed).length,
+    activeTurnCount: all.reduce((total, runtime) => total + (runtime?.activeTurnCount || 0), 0),
+  };
+}
+
 function setActive(runtime) {
   activeTurnRuntime = runtime || null;
 }
@@ -125,6 +138,31 @@ function setActive(runtime) {
 function clearActiveIf(runtime) {
   if (activeTurnRuntime === runtime) activeTurnRuntime = null;
 }
+
+async function cleanupStaleRuntimes() {
+  if (runtimeCleanupInFlight) return;
+  runtimeCleanupInFlight = true;
+  try {
+    const now = Date.now();
+    const stale = getAllRuntimes().filter((runtime) => {
+      if (!runtime || runtime.closed || (runtime.activeTurnCount || 0) > 0) return false;
+      return now - (runtime.lastUsedAt || runtime.createdAt || now) > GROK_RUNTIME_MAX_IDLE_MS;
+    });
+    for (const runtime of stale) {
+      console.log(`[GROK-DAEMON] disposing stale runtime (idle ${Math.round((now - (runtime.lastUsedAt || runtime.createdAt || now)) / 1000)}s)`);
+      await disposeRuntime(runtime);
+    }
+  } catch (error) {
+    console.warn('[GROK-DAEMON] idle runtime cleanup failed:', error?.message || error);
+  } finally {
+    runtimeCleanupInFlight = false;
+  }
+}
+
+const runtimeCleanupTimer = setInterval(() => {
+  cleanupStaleRuntimes().catch(() => {});
+}, GROK_RUNTIME_CLEANUP_INTERVAL_MS);
+runtimeCleanupTimer.unref();
 
 // =============================================================================
 // Runtime lifecycle
@@ -163,9 +201,6 @@ async function createRuntime(params, { log } = {}) {
     resolvedAuth.authMethod,
     false
   );
-  if (params.reasoningEffort) {
-    env.GROK_REASONING_EFFORT = String(params.reasoningEffort);
-  }
   env.GROK_NO_AUTO_UPDATE = '1';
   env.CI = env.CI || '1';
 
@@ -317,8 +352,6 @@ async function executeTurn(runtime, params, normalizer) {
   const emit = (type, payload) => normalizer.handleAcpEvent(type, payload);
 
   try {
-    normalizer.begin();
-
     // Ensure we have a live session id (in case previous was recreated)
     let sid = runtime.sessionId || params.sessionId || runtime.client?.activeSessionId || '';
     if (!sid || runtime.client.closed) {
@@ -332,6 +365,10 @@ async function executeTurn(runtime, params, normalizer) {
       runtime.sessionId = sid;
     }
 
+    // Inside the turn queue, before installing stream handlers: config updates
+    // must complete before inference and must not appear as assistant content.
+    await applyReasoningEffortToSession(runtime.client, sid, params.reasoningEffort);
+    normalizer.begin();
     emit('session_id', sid);
 
     const promptBlocks = buildPromptBlocks({
@@ -457,7 +494,9 @@ export async function sendMessagePersistent(params = {}) {
     error: (...a) => console.error(...a),
   });
 
-  runtime._turnQueue = runtime._turnQueue.then(async () => {
+  // A rejected option must fail that turn, but allow a corrected selection on
+  // the next turn to use this otherwise healthy runtime.
+  runtime._turnQueue = runtime._turnQueue.catch(() => {}).then(async () => {
     return executeTurn(runtime, params, normalizer);
   });
 
@@ -705,6 +744,7 @@ export async function getUsagePersistent(params = {}) {
 // For daemon introspection / tests
 export const __testing = {
   getRuntimes: () => getAllRuntimes(),
+  getRuntimeSnapshot,
   getActiveTurnRuntime: () => activeTurnRuntime,
   getActiveTurnRuntimeInternal: () => activeTurnRuntime,
   makeRuntimeKey,
@@ -743,6 +783,5 @@ export const __testing = {
   forceSetActiveTurn: (runtime) => {
     activeTurnRuntime = runtime || null;
   },
-  /** No-op placeholder for older tests that expected idle cleanup timers. */
-  triggerCleanup: () => {},
+  triggerCleanup: () => cleanupStaleRuntimes(),
 };

@@ -2,8 +2,11 @@ package com.github.claudecodegui.util;
 
 import com.github.claudecodegui.provider.CustomPricingProvider;
 import com.google.gson.JsonObject;
+import org.junit.After;
+import org.junit.Before;
 import org.junit.Test;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
@@ -11,6 +14,26 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
 
 public class UsageCostCalculatorTest {
+
+    private Path isolationConfig;
+
+    /**
+     * Isolate CustomPricingProvider from the developer's real ~/.codemoss config:
+     * without this, a locally configured customModelPricing silently overrides the
+     * built-in rates these tests assert (e.g. claude-sonnet-4-6).
+     */
+    @Before
+    public void isolateCustomPricing() throws IOException {
+        isolationConfig = Files.createTempFile("pricing-isolation", ".json");
+        Files.writeString(isolationConfig, "{}");
+        CustomPricingProvider.setInstanceForTests(CustomPricingProvider.createForTests(isolationConfig));
+    }
+
+    @After
+    public void restoreCustomPricing() throws IOException {
+        CustomPricingProvider.setInstanceForTests(null);
+        Files.deleteIfExists(isolationConfig);
+    }
 
     @Test
     public void calculatesClaudeTurnCostWithCacheBreakdown() {

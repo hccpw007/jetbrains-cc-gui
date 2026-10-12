@@ -1,14 +1,12 @@
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
-import { memo, useMemo, useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react';
+import { memo, useMemo, useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import katex from 'katex';
 import markedKatex from 'marked-katex-extension';
-import { openBrowser, openClass, openFile } from '../utils/bridge';
 import {
   captureRangeOffsets,
   restoreRangeOffsets,
-  type TextSelectionOffsets,
 } from '../utils/selectionOffsets';
 import { useMarkdownFileLinkTooltip } from '../hooks/useMarkdownFileLinkTooltip';
 import {
@@ -20,6 +18,9 @@ import {
   subscribeLinkifyCapabilities,
   type LinkifyCapabilities,
 } from '../utils/linkifyCapabilities';
+import { useMermaidDiagrams } from './MarkdownBlock/useMermaidDiagrams';
+import { useMarkdownClickHandler } from './MarkdownBlock/useMarkdownClickHandler';
+import { ImagePreviewOverlay } from './MarkdownBlock/ImagePreviewOverlay';
 import hljs from 'highlight.js/lib/core';
 import bash from 'highlight.js/lib/languages/bash';
 import css from 'highlight.js/lib/languages/css';
@@ -42,6 +43,7 @@ import yaml from 'highlight.js/lib/languages/yaml';
 import 'highlight.js/styles/github-dark.css';
 import 'katex/dist/katex.css';
 import { markedHighlight } from 'marked-highlight';
+import { copyToClipboard } from '../utils/copyUtils';
 
 const SAFE_HREF_PROTOCOL_REGEX = /^(?:https?|mailto):/i;
 const FILE_URI_SCHEME_REGEX = /^file:/i;
@@ -146,22 +148,6 @@ hljs.registerAliases(['sh', 'zsh'], { languageName: 'bash' });
 hljs.registerAliases(['html', 'xhtml', 'svg'], { languageName: 'xml' });
 hljs.registerAliases(['yml'], { languageName: 'yaml' });
 
-// Lazy-loaded mermaid singleton (deferred until first diagram is encountered)
-let mermaidInstance: typeof import('mermaid').default | null = null;
-async function getMermaid() {
-  if (!mermaidInstance) {
-    const mod = await import('mermaid');
-    mermaidInstance = mod.default;
-    mermaidInstance.initialize({
-      startOnLoad: false,
-      theme: 'dark',
-      securityLevel: 'strict',
-      fontFamily: 'inherit',
-    });
-  }
-  return mermaidInstance;
-}
-
 // Configure marked to use syntax highlighting
 marked.use(
   markedKatex({
@@ -177,50 +163,15 @@ marked.use(
         try {
           return hljs.highlight(code, { language: lang }).value;
         } catch {
-          // Silently fall through to auto-highlight
+          // Silently fall through to plain-text rendering
         }
       }
-      return hljs.highlightAuto(code).value;
+      // highlightAuto misclassifies prose like commit messages (leading "- " lines
+      // score as diff deletions), so unlabeled blocks render as plain text
+      return hljs.highlight(code, { language: 'plaintext' }).value;
     },
   })
 );
-
-// Mermaid syntax keywords used to detect diagram content (Set for O(1) lookup)
-const MERMAID_KEYWORDS = new Set([
-  'flowchart',
-  'graph',
-  'sequencediagram',
-  'classdiagram',
-  'statediagram',
-  'statediagram-v2',
-  'erdiagram',
-  'journey',
-  'gantt',
-  'pie',
-  'quadrantchart',
-  'requirementdiagram',
-  'gitgraph',
-  'mindmap',
-  'timeline',
-  'zenuml',
-  'sankey',
-  'xychart',
-  'xychart-beta',
-  'block-beta',
-]);
-
-const MERMAID_FENCE_REGEX = /```mermaid[\s\S]*?```/i;
-
-// Pre-compiled regex: matches any mermaid keyword at the start of a line
-const MERMAID_KEYWORD_REGEX = new RegExp(
-  `(^|\\n)\\s*(?:${[...MERMAID_KEYWORDS].join('|')})\\b`,
-  'i',
-);
-
-function hasPossibleMermaidContent(content: string): boolean {
-  if (!content) return false;
-  return MERMAID_FENCE_REGEX.test(content) || MERMAID_KEYWORD_REGEX.test(content);
-}
 
 marked.setOptions({
   breaks: false,
@@ -243,7 +194,10 @@ function safeStringifyContent(value: unknown): string {
     return String(value);
   }
   if (Array.isArray(value)) {
-    return value.map((item) => safeStringifyContent(item)).filter(Boolean).join('\n');
+    return value.flatMap((item) => {
+      const text = safeStringifyContent(item);
+      return text ? [text] : [];
+    }).join('\n');
   }
   if (typeof value === 'object') {
     const record = value as Record<string, unknown>;
@@ -274,20 +228,11 @@ function makeStreamSafe(content: string): string {
 
   // Handle code blocks: detect unclosed fenced code blocks (```)
   // Track code block state using a state machine approach
-  const lines = result.split('\n');
-  let inCodeBlock = false;
-
-  for (const line of lines) {
-    const trimmedLine = line.trim();
-    // Detect code block opening or closing
-    if (trimmedLine.startsWith('```')) {
-      inCodeBlock = !inCodeBlock;
-    }
-  }
+  const fence = getFenceState(result);
 
   // If still inside a code block, append a closing fence
-  if (inCodeBlock) {
-    result = result + '\n```';
+  if (fence.open) {
+    result = result + '\n' + fence.marker;
   }
 
   // Handle inline code: detect unclosed inline code (`)
@@ -335,7 +280,7 @@ function splitMarkdownBlocks(content: string): string[] {
 
     if (inFence) {
       current.push(line);
-      if (trimmed.startsWith(fenceMarker)) {
+      if (!nextFenceMarker(line, fenceMarker)) {
         inFence = false;
       }
       continue;
@@ -349,9 +294,10 @@ function splitMarkdownBlocks(content: string): string[] {
       continue;
     }
 
-    if (trimmed.startsWith('```') || trimmed.startsWith('~~~')) {
+    const openingFence = nextFenceMarker(line, '');
+    if (openingFence) {
       inFence = true;
-      fenceMarker = trimmed.slice(0, 3);
+      fenceMarker = openingFence;
       current.push(line);
       continue;
     }
@@ -406,7 +352,26 @@ function escapeXmlTags(text: string): string {
  * (outside fenced code blocks and inline code). Preserves code content as-is
  * so marked can handle XML tags inside code naturally (auto-escape).
  */
-const CODE_FENCE_RE = /(```[\s\S]*?```)/g;
+function splitCodeFences(content: string): string[] {
+  const parts: string[] = [];
+  let marker = '';
+  let start = 0;
+  let offset = 0;
+  for (const line of content.split('\n')) {
+    const nextMarker = nextFenceMarker(line, marker);
+    if (!marker && nextMarker) {
+      parts.push(content.slice(start, offset));
+      start = offset;
+    } else if (marker && !nextMarker) {
+      parts.push(content.slice(start, offset + line.length));
+      start = offset + line.length;
+    }
+    marker = nextMarker;
+    offset += line.length + 1;
+  }
+  parts.push(content.slice(start));
+  return parts;
+}
 const INLINE_CODE_RE = /(`[^`\n]+`)/g;
 const DISPLAY_MATH_DELIMITER_LINE_RE = /^([ \t]*)\$\$\s*$/;
 const BRACKET_MATH_DELIMITER_RE = /(?<!\\)(\\\[|\\\]|\\\(|\\\))/g;
@@ -424,8 +389,7 @@ const BRACKET_MATH_DELIMITER_MAP: Record<string, string> = {
  * fenced code blocks and inline code keep their literal backslash delimiters.
  */
 function normalizeBracketMathDelimiters(content: string): string {
-  return content
-    .split(CODE_FENCE_RE)
+  return splitCodeFences(content)
     .map((fencePart, fenceIdx) => {
       if (fenceIdx % 2 === 1) return fencePart;
 
@@ -444,8 +408,7 @@ function normalizeBracketMathDelimiters(content: string): string {
 }
 
 function normalizeIndentedDisplayMath(content: string): string {
-  return content
-    .split(CODE_FENCE_RE)
+  return splitCodeFences(content)
     .map((part, partIndex) => {
       if (partIndex % 2 === 1) return part;
 
@@ -479,7 +442,7 @@ function normalizeIndentedDisplayMath(content: string): string {
 
 function stripAndEscapeOutsideCodeBlocks(content: string): string {
   // First split by fenced code blocks
-  const fenceParts = content.split(CODE_FENCE_RE);
+  const fenceParts = splitCodeFences(content);
 
   return fenceParts
     .map((fencePart, fenceIdx) => {
@@ -672,6 +635,54 @@ interface BlockSectionProps {
   containerRef: React.RefObject<HTMLDivElement | null>;
 }
 
+function nextFenceMarker(line: string, marker: string): string {
+  const fence = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+  if (!fence) return marker;
+  if (!marker) return fence[1][0] !== '`' || !fence[2].includes('`') ? fence[1] : '';
+  return fence[1][0] === marker[0] && fence[1].length >= marker.length && !fence[2].trim() ? '' : marker;
+}
+
+function getFenceState(source: string) {
+  let marker = '';
+  let closed = 0;
+  for (const line of source.split('\n')) {
+    const nextMarker = nextFenceMarker(line, marker);
+    if (marker && !nextMarker) closed++;
+    marker = nextMarker;
+  }
+  return { open: marker !== '', marker, closed };
+}
+
+function useStreamingHighlightSource(source: string, isStreamingTail: boolean) {
+  const [snapshot, setSnapshot] = useState(source);
+  const committedSource = useRef(source);
+  const highlightedAt = useRef(Date.now());
+  const fence = useMemo(() => getFenceState(source), [source]);
+  const snapshotFence = useMemo(() => getFenceState(snapshot), [snapshot]);
+  const shouldWait = isStreamingTail && fence.open && source.startsWith(snapshot)
+    && fence.closed === snapshotFence.closed;
+  const renderedSource = shouldWait ? snapshot : source;
+
+  useLayoutEffect(() => {
+    if (committedSource.current !== renderedSource) {
+      committedSource.current = renderedSource;
+      highlightedAt.current = Date.now();
+    }
+    if (!shouldWait && snapshot !== source) setSnapshot(source);
+  }, [renderedSource, shouldWait, snapshot, source]);
+
+  useEffect(() => {
+    if (!shouldWait || snapshot === source) return;
+    const timer = window.setTimeout(
+      () => setSnapshot(source),
+      Math.max(0, 150 - (Date.now() - highlightedAt.current)),
+    );
+    return () => window.clearTimeout(timer);
+  }, [shouldWait, snapshot, source]);
+
+  return renderedSource;
+}
+
 /**
  * One top-level markdown block, memoized by source text. During streaming only
  * the tail block's source changes; every earlier block skips re-parsing, and
@@ -685,6 +696,11 @@ const BlockSection = memo(function BlockSection({
   copyCodeTitle,
   containerRef,
 }: BlockSectionProps) {
+  const renderedSource = useStreamingHighlightSource(source, isStreamingTail);
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (copiedTimer.current !== null) clearTimeout(copiedTimer.current);
+  }, []);
   const html = useMemo(
     () =>
       renderFullMarkdownHtml(
@@ -692,12 +708,12 @@ const BlockSection = memo(function BlockSection({
         // still arriving — temporarily close the structure so marked can parse
         // it. Once the real closing token arrives the source itself contains
         // it, makeStreamSafe becomes a no-op, and the HTML string is unchanged.
-        isStreamingTail ? makeStreamSafe(source) : source,
+        isStreamingTail ? makeStreamSafe(renderedSource) : renderedSource,
         linkifyCapabilities,
         copySuccessText,
         copyCodeTitle,
       ),
-    [source, isStreamingTail, linkifyCapabilities, copySuccessText, copyCodeTitle],
+    [renderedSource, isStreamingTail, linkifyCapabilities, copySuccessText, copyCodeTitle],
   );
 
   // Streaming selection preservation: when this block's HTML changes, its
@@ -710,30 +726,45 @@ const BlockSection = memo(function BlockSection({
   //
   // committedHtmlRef is read here but only mutated inside the layout effect
   // below, so a discarded concurrent render can't poison the "last committed"
-  // comparison. rescuedSelectionRef is written during render as a deferred
-  // payload for that effect; the value is idempotent across double-invoked
-  // renders and never influences render output.
+  // comparison.
   const committedHtmlRef = useRef(html);
-  const rescuedSelectionRef = useRef<TextSelectionOffsets | null>(null);
-
-  if (committedHtmlRef.current !== html && containerRef.current) {
-    rescuedSelectionRef.current = captureRangeOffsets(containerRef.current);
-  }
+  // The rescued selection is a render-scoped local (not a ref): it is
+  // computed from DOM state that is still valid during render and handed to
+  // the layout effect via closure, so nothing mutable is written during
+  // render and a discarded concurrent render leaves no residue.
+  const rescued =
+    committedHtmlRef.current !== html && containerRef.current
+      ? captureRangeOffsets(containerRef.current)
+      : null;
 
   useLayoutEffect(() => {
     committedHtmlRef.current = html;
-    const rescued = rescuedSelectionRef.current;
     if (rescued && containerRef.current) {
       restoreRangeOffsets(containerRef.current, rescued);
     }
-    rescuedSelectionRef.current = null;
-  }, [html, containerRef]);
+  }, [html, containerRef, rescued]);
 
-  return <div className="md-block" dangerouslySetInnerHTML={{ __html: html }} />;
+  const copyLatestCode = async (event: React.MouseEvent<HTMLDivElement> | React.KeyboardEvent<HTMLDivElement>) => {
+    if (source === renderedSource) return;
+    if ('key' in event && event.key !== 'Enter' && event.key !== ' ') return;
+    const target = event.target as HTMLElement;
+    const button = target.closest?.('button.copy-code-btn');
+    if (!button) return;
+    const code = button.closest('.code-block-wrapper')?.querySelector('pre code');
+    const index = Array.from(event.currentTarget.querySelectorAll('pre code')).indexOf(code as HTMLElement);
+    const token = marked.lexer(source).filter(token => token.type === 'code')[index];
+    if (!token || token.type !== 'code') return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (await copyToClipboard(`${token.text}\n`) && button.isConnected) {
+      button.classList.add('copied');
+      if (copiedTimer.current !== null) clearTimeout(copiedTimer.current);
+      copiedTimer.current = setTimeout(() => button.classList.remove('copied'), 1500);
+    }
+  };
+
+  return <div className="md-block" onClick={copyLatestCode} onKeyDown={copyLatestCode} dangerouslySetInnerHTML={{ __html: html }} />;
 });
-
-// Mermaid render counter for generating unique IDs
-let mermaidIdCounter = 0;
 
 // Copy icon SVG (hoisted to module scope to avoid recreation on each render)
 const copyIconSvg = `
@@ -763,236 +794,24 @@ const MarkdownBlock = ({ content = '', isStreaming = false }: MarkdownBlockProps
   const copySuccessText = t('markdown.copySuccess');
   const copyCodeTitle = t('markdown.copyCode');
 
-  // Ref for tracking retry count
-  const mermaidRetryRef = useRef(0);
-  const MERMAID_MAX_RETRIES = 3;
-
   const fileLinkTooltip = useMarkdownFileLinkTooltip();
 
   useEffect(() => {
     return subscribeLinkifyCapabilities(setLinkifyCapabilities);
   }, []);
 
-  // Render mermaid diagrams
-  const renderMermaidDiagrams = useCallback(async () => {
-    if (!containerRef.current) return;
+  // Render mermaid diagrams after HTML updates (skipped during streaming)
+  useMermaidDiagrams(containerRef, isStreaming, normalizedContent);
 
-    const codeBlocks = containerRef.current.querySelectorAll('pre code');
-
-    // If no code blocks found, reset retry count
-    if (codeBlocks.length === 0) {
-      mermaidRetryRef.current = 0;
-      return;
-    }
-
-    let renderedAny = false;
-
-    for (const codeBlock of codeBlocks) {
-      const pre = codeBlock.parentElement;
-      if (!pre) continue;
-
-      const wrapper = pre.parentElement;
-      if (wrapper?.classList.contains('mermaid-rendered')) continue;
-
-      // Get the text content of the code block
-      let code = codeBlock.textContent || '';
-
-      // Clean up any remaining markdown markers (e.g., ```mermaid)
-      code = code.replace(/^```mermaid\s*/i, '').replace(/```\s*$/, '').trim();
-
-      if (!code) continue;
-
-      // Check if the content is mermaid syntax (starts with a keyword)
-      const firstWord = code.split(/[\s\n]/)[0].toLowerCase();
-      const isMermaid = MERMAID_KEYWORDS.has(firstWord);
-
-      if (!isMermaid) continue;
-
-      // Show loading placeholder while mermaid library loads
-      const loadingEl = document.createElement('div');
-      loadingEl.className = 'mermaid-loading';
-      loadingEl.textContent = 'Loading diagram\u2026';
-      loadingEl.style.cssText = 'padding:12px;color:var(--text-secondary,#888);';
-      if (wrapper?.classList.contains('code-block-wrapper')) {
-        wrapper.insertBefore(loadingEl, pre);
-      } else {
-        pre.parentNode?.insertBefore(loadingEl, pre);
-      }
-
-      try {
-        const mmd = await getMermaid();
-        const id = `mermaid-${++mermaidIdCounter}`;
-        const { svg } = await mmd.render(id, code);
-
-        const mermaidContainer = document.createElement('div');
-        mermaidContainer.className = 'mermaid-diagram';
-        mermaidContainer.innerHTML = svg;
-
-        // Remove loading placeholder
-        loadingEl.remove();
-
-        if (wrapper?.classList.contains('code-block-wrapper')) {
-          wrapper.classList.add('mermaid-rendered');
-          pre.style.display = 'none';
-          wrapper.insertBefore(mermaidContainer, pre);
-        } else {
-          const newWrapper = document.createElement('div');
-          newWrapper.className = 'code-block-wrapper mermaid-rendered';
-          newWrapper.appendChild(mermaidContainer);
-          pre.parentNode?.replaceChild(newWrapper, pre);
-        }
-        renderedAny = true;
-      } catch {
-        // Mermaid render error - remove loading indicator and silently skip
-        loadingEl.remove();
-      }
-    }
-
-    // If any diagrams were rendered, reset retry count
-    if (renderedAny) {
-      mermaidRetryRef.current = 0;
-    }
-
-    return renderedAny;
-  }, []);
-
-  // Render mermaid diagrams after HTML updates (skip during streaming to prevent flicker)
-  useEffect(() => {
-    if (isStreaming) return;
-    if (!hasPossibleMermaidContent(normalizedContent)) {
-      mermaidRetryRef.current = 0;
-      return;
-    }
-
-    let retryTimeoutId: ReturnType<typeof setTimeout> | null = null;
-    let retryRafId: number | null = null;
-
-    // Use double requestAnimationFrame to ensure the DOM is fully rendered
-    let rafId1 = requestAnimationFrame(() => {
-      rafId1 = requestAnimationFrame(() => {
-        renderMermaidDiagrams().then((rendered) => {
-          // If no diagrams were rendered and retry limit not reached, retry after a delay
-          if (!rendered && mermaidRetryRef.current < MERMAID_MAX_RETRIES) {
-            mermaidRetryRef.current++;
-            retryTimeoutId = setTimeout(() => {
-              retryRafId = requestAnimationFrame(() => {
-                renderMermaidDiagrams();
-              });
-            }, 100 * mermaidRetryRef.current);
-          }
-        });
-      });
-    });
-
-    return () => {
-      cancelAnimationFrame(rafId1);
-      if (retryTimeoutId) clearTimeout(retryTimeoutId);
-      if (retryRafId) cancelAnimationFrame(retryRafId);
-    };
-  }, [normalizedContent, isStreaming, renderMermaidDiagrams]);
-
-  // Copy to clipboard implementation
-  const copyToClipboard = async (text: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
-      return true;
-    } catch (err) {
-      // Fallback method for environments where navigator.clipboard is not available
-      try {
-        const textarea = document.createElement('textarea');
-        textarea.value = text;
-        textarea.style.position = 'fixed';
-        textarea.style.left = '-9999px';
-        textarea.style.top = '0';
-        document.body.appendChild(textarea);
-        textarea.focus();
-        textarea.select();
-        const successful = document.execCommand('copy');
-        document.body.removeChild(textarea);
-        return successful;
-      } catch (e) {
-        console.error('Copy failed:', e);
-        return false;
-      }
-    }
-  };
-
-  const handleClick = async (event: React.MouseEvent<HTMLDivElement>) => {
-    // React synthetic events may have a Text node as target when the user
-    // clicks inside an <a> element. Walk up to the parent element so that
-    // element.closest() can be used safely.
-    const targetNode = event.target as unknown as Node;
-    const target = targetNode.nodeType === Node.TEXT_NODE
-      ? (targetNode as Text).parentElement
-      : (event.target as HTMLElement);
-
-    const copyBtn = target?.closest('button.copy-code-btn') as HTMLButtonElement | null;
-    if (copyBtn && containerRef.current?.contains(copyBtn)) {
-      event.preventDefault();
-      event.stopPropagation();
-
-      const wrapper = copyBtn.closest('.code-block-wrapper');
-      const codeElement = wrapper?.querySelector('pre code') as HTMLElement | null;
-      const text = codeElement?.innerText || codeElement?.textContent || '';
-      const success = await copyToClipboard(text);
-
-      if (success) {
-        copyBtn.classList.add('copied');
-        window.setTimeout(() => copyBtn.classList.remove('copied'), 1500);
-      }
-      return;
-    }
-
-    const img = target?.closest('img');
-    if (img && img.getAttribute('src')) {
-      setPreviewSrc(img.getAttribute('src'));
-      return;
-    }
-
-    let anchor = target?.closest('a');
-
-    // Fallback: if the click target is not inside an <a> (e.g. a portal
-    // tooltip with broken pointer-events overlaying the link), use the
-    // click coordinates to find which <a> was actually clicked.
-    if (!anchor && containerRef.current) {
-      const x = event.clientX;
-      const y = event.clientY;
-      const links = containerRef.current.querySelectorAll('a');
-      for (const link of Array.from(links)) {
-        const rect = link.getBoundingClientRect();
-        if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
-          anchor = link as HTMLAnchorElement;
-          break;
-        }
-      }
-    }
-
-    if (!anchor) {
-      return;
-    }
-
-    event.preventDefault();
-    const href = anchor.getAttribute('href');
-    if (!href) {
-      return;
-    }
-
-    const linkType = anchor.getAttribute('data-linkify');
-
-    if (linkType === 'file') {
-      openFile(href);
-      return;
-    }
-
-    if (linkType === 'class') {
-      openClass(href);
-      return;
-    }
-
-    if (linkType === 'url' || /^(https?:|mailto:)/.test(href)) {
-      openBrowser(href);
-    } else {
-      openFile(href);
+  const handleClick = useMarkdownClickHandler(containerRef, setPreviewSrc);
+  // Keyboard mirror of the delegated click handler: Enter/Space act like a
+  // click at the focused element (links, copy buttons, images rendered via
+  // dangerouslySetInnerHTML). preventDefault suppresses the native activation
+  // click so the handler never runs twice for one key press.
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      void handleClick(e as unknown as React.MouseEvent<HTMLDivElement>);
     }
   };
 
@@ -1005,9 +824,18 @@ const MarkdownBlock = ({ content = '', isStreaming = false }: MarkdownBlockProps
         ref={containerRef}
         className="markdown-content"
         onClick={handleClick}
+        role="button"
+        tabIndex={0}
+        onKeyDown={handleKeyDown}
         onMouseOver={fileLinkTooltip.handleMouseOver}
         onMouseMove={fileLinkTooltip.handleMouseMove}
         onMouseOut={fileLinkTooltip.handleMouseOut}
+        onFocus={(e) =>
+          fileLinkTooltip.handleMouseOver(e as unknown as React.MouseEvent<HTMLDivElement>)
+        }
+        onBlur={(e) =>
+          fileLinkTooltip.handleMouseOut(e as unknown as React.MouseEvent<HTMLDivElement>)
+        }
       >
         {blocks.map((source, index) => (
           <BlockSection
@@ -1024,26 +852,11 @@ const MarkdownBlock = ({ content = '', isStreaming = false }: MarkdownBlockProps
       {/* Tooltip is managed via native DOM API in handleMouseOver/handleMouseOut
           to avoid React re-render issues that break click events in JCEF. */}
       {previewSrc && (
-        <div
-          className="image-preview-overlay"
-          onClick={() => setPreviewSrc(null)}
-          onKeyDown={(e) => e.key === 'Escape' && setPreviewSrc(null)}
-          tabIndex={0}
-        >
-          <img
-            className="image-preview-content"
-            src={previewSrc}
-            alt=""
-            onClick={(e) => e.stopPropagation()}
-          />
-          <button
-            className="image-preview-close"
-            onClick={() => setPreviewSrc(null)}
-            title={t('chat.closePreview')}
-          >
-            ×
-          </button>
-        </div>
+        <ImagePreviewOverlay
+          src={previewSrc}
+          closeTitle={t('chat.closePreview')}
+          onClose={() => setPreviewSrc(null)}
+        />
       )}
     </>
   );

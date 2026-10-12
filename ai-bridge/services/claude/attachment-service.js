@@ -8,14 +8,14 @@ import { mkdir, writeFile, readdir, stat as statAsync, unlink } from 'fs/promise
 import path from 'path';
 import os from 'os';
 import crypto from 'crypto';
-import { modelSupportsVision } from '../../utils/model-utils.js';
 import {
   loadVisionMcpConfig,
   resolveVisionMcpToolName,
   buildVisionMcpPrompt,
 } from './vision-mcp-config.js';
 
-// Image temp directory shared across the daemon's lifetime.
+// Temp image directory shared by the vision-MCP path mode; also retained for
+// cleanup of image files written by older plugin versions.
 const TEMP_IMAGE_SUBDIR = 'cc-gui-images';
 // Files older than 24h are removed at daemon startup to bound disk growth.
 const TEMP_IMAGE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -111,13 +111,11 @@ export async function loadAttachments(stdinData) {
 }
 
 /**
- * Save base64 image data to a temporary file for cross-model compatibility.
+ * Save base64 image data to a temporary file (vision-MCP path transmission).
  *
- * Some models (e.g. mimo-v2.5-pro, deepseek, qwen) do not handle Anthropic
- * vision content blocks reliably — especially when routed through third-party
- * proxies that may strip image blocks during translation. Saving to a file and
- * referencing the path lets the model use the Read tool to load the image,
- * matching Claude Code CLI's universal image handling approach.
+ * Vision-MCP mode hands the model a local path instead of a structured image
+ * block, so the configured image-recognition MCP tool (or the Read tool) can
+ * load the bytes from disk regardless of proxy image support.
  *
  * @param {string} base64Data - Base64-encoded image data (no "data:" prefix)
  * @param {string} mediaType - MIME type (e.g. "image/png")
@@ -184,24 +182,22 @@ export async function cleanupStaleTempImages() {
  * Build user message content blocks (supports images and text).
  *
  * Image transmission strategy depends on the vision-MCP settings (loaded from
- * ~/.codemoss/config.json via vision-mcp-config.js) and the target model:
+ * ~/.codemoss/config.json via vision-mcp-config.js):
  * - enabled on: images are saved to temp files and injected as references the
- *   model is asked to resolve via the selected vision MCP tool. Native vision
- *   blocks are never produced, so a `claude-*` name served by a non-vision
- *   proxy (DeepSeek et al.) no longer yields "[Unsupported Image]".
- * - enabled off + Claude models: Inline base64 vision content blocks (most
- *   efficient, natively supported by the Anthropic API).
- * - enabled off + non-Claude models (mimo, deepseek, qwen, etc.): Save images
- *   to temp files and reference paths in the message text. The model is asked
- *   to use the Read tool to load them, matching Claude Code CLI behavior. This
- *   avoids issues where third-party proxies silently drop vision content blocks.
+ *   model is asked to resolve via the selected vision MCP tool (or the Read
+ *   tool when no MCP server name is configured yet). Native vision blocks are
+ *   never produced, so a `claude-*` name served by a non-vision proxy
+ *   (DeepSeek et al.) no longer yields "[Unsupported Image]".
+ * - enabled off: every image stays an inline base64 vision content block.
+ *   Provider aliases do not describe vision capabilities, and replacing images
+ *   with file paths loses visual input on endpoints that only accept images in
+ *   user content blocks (#1725: large images failed through third-party APIs).
  *
  * @param {Array} attachments - Attachment array
  * @param {string} message - User message text
- * @param {string|null} modelId - Resolved model ID actually sent to the API
- *                                  (e.g. "claude-sonnet-4-5", "mimo-v2.5-pro").
- *                                  Used to decide image transmission strategy
- *                                  when the vision-MCP toggle is off.
+ * @param {string|null} modelId - Unused placeholder kept for call-site
+ *                                  compatibility; the image strategy no longer
+ *                                  depends on the model name.
  * @param {Object} [opts] - Optional overrides (kept internal so the three call
  *        sites in message-sender.js stay untouched):
  *        - cwd: working directory for project-scoped MCP config.
@@ -211,23 +207,15 @@ export async function cleanupStaleTempImages() {
  */
 export async function buildContentBlocks(attachments, message, modelId = null, opts = {}) {
   const visionConfig = (opts.loadVisionMcpConfig || loadVisionMcpConfig)();
-  const useNativeVision = !visionConfig.enabled && modelSupportsVision(modelId);
   const contentBlocks = [];
   const imagePathRefs = [];
 
   for (const a of attachments) {
     const mt = typeof a.mediaType === 'string' ? a.mediaType : '';
     if (mt.startsWith('image/')) {
-      if (useNativeVision) {
-        contentBlocks.push({
-          type: 'image',
-          source: {
-            type: 'base64',
-            media_type: mt || 'image/png',
-            data: a.data
-          }
-        });
-      } else {
+      // Vision-MCP mode gives the model a local path to resolve; otherwise the
+      // image stays a structured block the endpoint receives directly.
+      if (visionConfig.enabled) {
         const tempPath = await saveImageToTemp(a.data, mt, a.fileName);
         if (tempPath) {
           // Carry mediaType/data alongside the path rather than a bare path:
@@ -235,13 +223,18 @@ export async function buildContentBlocks(attachments, message, modelId = null, o
           // array by ref-index would alias across the text entry, so record the
           // image's own info at save time.
           imagePathRefs.push({ path: tempPath, mediaType: mt, data: a.data });
-          console.log('[ATTACHMENTS] Saved image to temp for non-vision model:', tempPath);
+          console.log('[ATTACHMENTS] Saved image to temp for vision MCP:', tempPath);
         } else {
           contentBlocks.push({
             type: 'image',
             source: { type: 'base64', media_type: mt || 'image/png', data: a.data }
           });
         }
+      } else {
+        contentBlocks.push({
+          type: 'image',
+          source: { type: 'base64', media_type: mt || 'image/png', data: a.data }
+        });
       }
     } else {
       const name = a.fileName || 'Attachment';
@@ -251,9 +244,9 @@ export async function buildContentBlocks(attachments, message, modelId = null, o
 
   let userText = message;
   if (!userText || userText.trim() === '') {
-    const totalImages = useNativeVision
-      ? contentBlocks.filter(b => b.type === 'image').length
-      : imagePathRefs.length;
+    // Count both structured blocks and vision-MCP path refs: the latter never
+    // enter contentBlocks, so an image-only upload would otherwise look empty.
+    const totalImages = contentBlocks.filter(b => b.type === 'image').length + imagePathRefs.length;
     const textCount = contentBlocks.filter(b => b.type === 'text').length;
     if (totalImages > 0) {
       userText = `[Uploaded ${totalImages} image(s)]`;
@@ -265,14 +258,13 @@ export async function buildContentBlocks(attachments, message, modelId = null, o
   }
 
   if (imagePathRefs.length > 0) {
-    // When a vision MCP is configured (toggle on + a server name set), steer the
-    // model to that MCP tool to resolve the images. The tool name is discovered
-    // at runtime (only the configured server is probed) so any image MCP works
-    // without a hard-coded server-to-tool mapping. Otherwise (toggle off, or no
-    // MCP name configured yet) keep the original path + Read-tool hint so users
-    // who never touched these settings see unchanged behavior.
+    // Vision MCP is on here (off never produces path refs). When a server name
+    // is configured, steer the model to that MCP tool; the tool name is
+    // discovered at runtime (only the configured server is probed) so any image
+    // MCP works without a hard-coded server-to-tool mapping. With no server
+    // name set yet, keep the path + Read-tool hint so images still resolve.
     let mcpPrompt = null;
-    if (visionConfig.enabled && visionConfig.mcpName) {
+    if (visionConfig.mcpName) {
       const { toolName } = await resolveVisionMcpToolName(
         visionConfig.mcpName, opts.cwd, opts.resolveVisionMcpToolName);
       mcpPrompt = buildVisionMcpPrompt(
